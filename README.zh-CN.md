@@ -137,6 +137,16 @@ T0 是原生复制，resume 直接续。T1 写入目标原生存储并注册。T
 它们回答"我的会话里发生了什么"。AgentRelay 回答"这场会话换个地方继续"。
 </details>
 
+## 赞助
+
+如果 AgentRelay 帮你省下了时间，欢迎请作者喝杯咖啡：
+
+<p align="center">
+  <img src="docs/assets/sponsor-wechat.jpg" width="220" alt="微信赞赏码">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/assets/sponsor-alipay.jpg" width="220" alt="支付宝">
+</p>
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=DavidLi-TJ/AgentRelay&type=Date)](https://star-history.com/#DavidLi-TJ/AgentRelay&Date)

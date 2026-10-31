@@ -106,6 +106,9 @@ $('#btn-lang').addEventListener('click', () => {
 function renderAll() {
   renderRail(); renderSessions(); renderRelay(); loadActivity().catch(() => { });
   renderQuickStart();
+  // 语言切换时正在显示的视图也要重渲染（表格头/详情等 JS 渲染文案）
+  if (document.querySelector('#view-settings.active')) loadSettings().catch(() => { });
+  if (state.current) { renderDetail(); refreshPreview(); }
 }
 
 /* ---------------- 导航 ---------------- */
@@ -895,10 +898,6 @@ async function loadSettings() {
   applyGlass(state.config.bgGlass != null ? state.config.bgGlass : 40);
   $('#set-checkup').checked = !!state.config.checkUpdates;
   $('#set-datadir').value = state.config.dataDir || '';
-  $('#set-repo').value = state.config.githubRepo || '';
-  $('#set-author').value = state.config.authorName || '';
-  $('#set-sponsor').value = state.config.sponsorUrl || '';
-  $('#set-coffee').value = state.config.buyCoffeeUrl || '';
   checkUpdateOnce();
 }
 
@@ -969,29 +968,30 @@ function applyBgImage(path) {
   if (inp && inp.value !== (path || '')) inp.value = path || '';
 }
 
+const SELF_REPO = 'DavidLi-TJ/AgentRelay'; // 本项目自己的仓库：关于卡片与更新检查的默认值
+const SELF_SPONSOR = 'https://github.com/' + SELF_REPO + '/blob/main/docs/sponsor.md';
+
 function renderAbout() {
   const box = $('#about-box');
   if (!box) return;
   const c = state.config || {};
-  const repo = c.githubRepo || '';
+  const repo = c.githubRepo || SELF_REPO;
   const safeHref = (u) => (/^https?:\/\//i.test(String(u)) ? String(u) : '#');
-  const links = [];
-  if (repo) {
-    links.push(`<a class="btn small" href="https://github.com/${esc(repo)}" target="_blank">${icon('star')} GitHub</a>`);
-    links.push(`<a class="btn small" href="https://github.com/${esc(repo)}/issues" target="_blank">${icon('info')} ${esc(t('问题反馈'))}</a>`);
-  }
-  if (c.sponsorUrl) links.push(`<a class="btn small" href="${esc(safeHref(c.sponsorUrl))}" target="_blank" rel="noopener noreferrer">${icon('heart')} ${esc(t('赞助'))}</a>`);
-  if (c.buyCoffeeUrl) links.push(`<a class="btn small" href="${esc(safeHref(c.buyCoffeeUrl))}" target="_blank" rel="noopener noreferrer">${icon('coffee')} Buy Me a Coffee</a>`);
-  const by = c.authorName ? `<span class="about-ver">by ${esc(c.authorName)}</span>` : '';
+  const by = c.authorName ? ` <span class="about-ver">by ${esc(c.authorName)}</span>` : '';
   box.innerHTML = `
-    <div class="about-appname">AgentRelay <span class="about-ver">v${esc(c.version || '?')}</span> ${by}</div>
+    <div class="about-appname">AgentRelay <span class="about-ver">v${esc(c.version || '?')}</span>${by}</div>
     <div class="about-desc">${esc(t('把你的 agent 会话原封不动地接力给下一个 agent。全部本地运行。'))}</div>
-    <div class="about-links">${links.join('') || `<span class="muted">${esc(t('在右侧填入 GitHub 仓库并保存后，这里会出现 Star / 反馈 / 赞助按钮。'))}</span>`}</div>`;
+    <div class="about-links">
+      <a class="btn small" href="https://github.com/${esc(repo)}" target="_blank">${icon('star')} GitHub</a>
+      <a class="btn small" href="https://github.com/${esc(repo)}/issues" target="_blank">${icon('info')} ${esc(t('问题反馈'))}</a>
+      <a class="btn small" href="${esc(safeHref(c.sponsorUrl || SELF_SPONSOR))}" target="_blank" rel="noopener noreferrer">${icon('heart')} ${esc(t('赞助'))}</a>
+    </div>`;
 }
 
 async function checkUpdateOnce(force = false) {
   const c = state.config || {};
-  if (!c.checkUpdates || !c.githubRepo) return;
+  if (!c.checkUpdates) return;
+  const repo = c.githubRepo || SELF_REPO;
   if (!force) {
     const last = Number(localStorage.getItem('ms-update-checked') || 0);
     if (Date.now() - last < 3600 * 1000) return;
@@ -1092,10 +1092,6 @@ function bindSettings() {
         fontScale: $('#set-fontscale').value,
         bgImage: $('#set-bgimage').value.trim(),
         bgGlass: Number($('#set-glass').value) || 0,
-        githubRepo: $('#set-repo').value.trim(),
-        authorName: $('#set-author').value.trim(),
-        sponsorUrl: $('#set-sponsor').value.trim(),
-        buyCoffeeUrl: $('#set-coffee').value.trim(),
         checkUpdates: $('#set-checkup').checked,
       };
       const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

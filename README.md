@@ -137,6 +137,16 @@ Original text. ARX keeps every message, tool call, and result verbatim; your sel
 Those answer "what happened in my sessions". AgentRelay answers "continue this session somewhere else".
 </details>
 
+## Sponsor
+
+If AgentRelay saved you some time, a coffee is always appreciated:
+
+<p align="center">
+  <img src="docs/assets/sponsor-wechat.jpg" width="220" alt="WeChat tip">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/assets/sponsor-alipay.jpg" width="220" alt="Alipay">
+</p>
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=DavidLi-TJ/AgentRelay&type=Date)](https://star-history.com/#DavidLi-TJ/AgentRelay&Date)

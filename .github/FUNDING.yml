@@ -1,0 +1,4 @@
+custom:
+  - type: "Custom"
+    url: "https://github.com/DavidLi-TJ/AgentRelay/blob/main/docs/sponsor.md"
+    description: "微信 / 支付宝赞赏"
