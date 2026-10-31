@@ -154,6 +154,7 @@ function writeTarget(instanceId) {
 
 // 设置页专用：返回全部实例（含已停用的内置实例），enabled 反映真实开关状态
 function instancesForSettings() {
+  const counts = new Map(listInstances().map((i) => [i.instanceId || i.id, i.sessionCount || 0]));
   const cfg = config();
   const out = [];
   for (const type of Object.keys(ADAPTERS)) {
@@ -162,13 +163,13 @@ function instancesForSettings() {
     const enabled = cfg.agents?.[type]?.enabled !== false;
     let probe = { ok: false, storage: null };
     try { probe = ADAPTERS[type].doctor(inst.baseDir); } catch { }
-    out.push({ ...inst, enabled, available: enabled && probe.ok, storage: probe.storage || null, sessionCount: 0 });
+    out.push({ ...inst, enabled, available: enabled && probe.ok, storage: probe.storage || null, sessionCount: counts.get(type) || 0 });
   }
   for (const inst of loadInstances()) {
     if (inst.builtin) continue;
     let probe = { ok: false, storage: null };
     try { probe = ADAPTERS[inst.type].doctor(inst.baseDir); } catch { }
-    out.push({ ...inst, enabled: true, available: probe.ok, storage: probe.storage || inst.baseDir, sessionCount: 0 });
+    out.push({ ...inst, enabled: true, available: probe.ok, storage: probe.storage || inst.baseDir, sessionCount: counts.get(inst.instanceId) || 0 });
   }
   return out;
 }
