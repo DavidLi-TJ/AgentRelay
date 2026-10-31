@@ -120,10 +120,12 @@ async function callTool(name, args = {}) {
       })));
     }
     case 'get_session': {
-      if (!args.id) return textResult({ error: '需要 id 参数' }, true);
+      // 兼容两种命名：schema 用 id，其他工具用 sessionId——统一接受
+      const sid = args.id || args.sessionId;
+      if (!sid) return textResult({ error: '需要 id 参数' }, true);
       const msx = args.instance
-        ? await agents.readMsxInstance(args.instance, args.id)
-        : await agents.readMsx(args.agent || 'claude', args.id);
+        ? await agents.readMsxInstance(args.instance, sid)
+        : await agents.readMsx(args.agent || 'claude', sid);
       const limit = Number(args.entries_limit) > 0 ? Number(args.entries_limit) : 30;
       const lines = [`标题: ${msx.source.title}`, `来源: ${msx.source.agent} (${msx.source.session_id})`, `项目: ${msx.project.cwd}`,
         `统计: ${JSON.stringify(msx.stats)}`, '', '--- 消息流（截断预览）---'];

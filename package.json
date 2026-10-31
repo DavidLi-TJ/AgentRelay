@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server/index.js",
     "test": "node scripts/sandbox-test.js",
-    "e2e": "node scripts/e2e.js"
+    "e2e": "node scripts/e2e.js",
+    "mcp-verify": "node scripts/mcp-verify.js"
   },
   "engines": {
     "node": ">=22.5"
