@@ -1,0 +1,15 @@
+{
+  "name": "agentrelay",
+  "version": "0.2.0",
+  "description": "AgentRelay —— 跨 AI Agent 会话接力：逐字保真、选择性加载、多 agent 互通",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node scripts/sandbox-test.js",
+    "e2e": "node scripts/e2e.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "license": "MIT"
+}

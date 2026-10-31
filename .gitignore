@@ -1,0 +1,49 @@
+# ── 运行 / 测试产物（本地生成，不入库）────────────────────
+sandbox/
+*.msx-tmp-*
+*.arx-tmp-*
+VERIFICATION.json
+
+# ── 内部过程文档（含本地路径与会话信息，只留本地）────────
+PLAN.md
+ACCEPTANCE.md
+
+# ── 数据目录：应用配置、备份、日志、导出（绝不入库）──────
+.agentrelay/
+.movesession/
+backups/
+exports/
+log.jsonl
+*.log
+
+# ── 数据库与边车文件（本地测试可能产生）──────────────────
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# ── 依赖 / 构建 ───────────────────────────────────────────
+node_modules/
+dist/
+
+# ── 开发期一次性补丁脚本（历史产物，不属于项目本体）──────
+scripts/patch_*.py
+scripts/check_tpl.js
+scripts/fix_backslash.js
+
+# ── 未在 README 使用的截图（可能含本机日志内容）──────────
+docs/assets/logs.png
+
+# ── 截图草稿目录（正式截图在 docs/assets，公开前需确认脱敏）
+docs/screenshots/
+docs/assets/_draft/
+
+# ── 编辑器 / 系统 ─────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store

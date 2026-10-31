@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentRelay</title>
+<meta name="description" content="把 AI coding agent 的本地会话原封不动地接力给另一个 agent。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236d8bff' stroke-width='1.5'><rect x='3' y='3' width='8' height='8' rx='2.2'/><rect x='13' y='13' width='8' height='8' rx='2.2'/><path d='M13 7h4a4 4 0 0 1 4 4M11 17H7a4 4 0 0 1-4-4'/></svg>">
+<link rel="preload" href="fonts/GeistSans.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="noise" aria-hidden="true"></div>
+<div class="bg-image" id="bg-image" aria-hidden="true"></div>
+<div id="app">
+<nav class="topnav">
+  <div class="brand">
+    <span class="logo" data-icon="logo"></span>
+    <span class="brand-name">AgentRelay</span>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-view="sessions" data-i18n="会话">会话</button>
+    <button class="tab" data-view="relay" data-i18n="接力">接力</button>
+    <button class="tab" data-view="activity" data-i18n="活动">活动</button>
+    <button class="tab" data-view="diagnostics" data-i18n="诊断">诊断</button>
+    <button class="tab" data-view="settings" data-i18n="设置">设置</button>
+  </div>
+  <div class="nav-actions">
+    <span id="server-status" class="status-dot" title="local server"></span>
+    <button class="iconbtn" id="btn-lang" title="Language">中/EN</button>
+    <button class="iconbtn" id="btn-theme" title="Theme"></button>
+    <button class="iconbtn" id="btn-refresh" data-icon-title="refresh"><span data-icon="refresh"></span></button>
+  </div>
+</nav>
+
+<main id="main">
+
+  <!-- 会话 -->
+  <section id="view-sessions" class="view active">
+    <div class="sessions-layout">
+    <aside class="rail" id="agent-rail"></aside>
+    <section class="list-col">
+      <div class="toolbar">
+        <input id="search" class="input" type="text" data-i18n-ph="搜索标题、路径，回车全文搜索" placeholder="搜索标题、路径，回车全文搜索">
+        <span id="list-count" class="count"></span>
+      </div>
+      <div id="quickstart" class="quickstart"></div>
+      <div id="session-list" class="session-list"></div>
+    </section>
+    <section class="detail-col" id="detail-col">
+      <div class="empty-detail" id="empty-detail">
+        <div class="empty-glyph" data-icon="empty"></div>
+        <p data-i18n="选择左侧一个会话，右侧逐字预览。">选择左侧一个会话，右侧逐字预览。</p>
+        <p class="muted" data-i18n="勾选要带走的条目，然后在接力页完成跨 agent 接力。">勾选要带走的条目，然后在接力页完成跨 agent 接力。</p>
+      </div>
+      <div id="detail" class="detail hidden"></div>
+    </section>
+    </div>
+  </section>
+
+  <!-- 接力 -->
+  <section id="view-relay" class="view">
+    <div class="relay-wrap">
+      <header class="relay-head">
+        <h2 data-i18n="接力">接力</h2>
+        <p class="muted" data-i18n="把选中的会话写进目标 agent 的原生存储，接上就能继续干。三步：选源、选目标、执行。">把选中的会话写进目标 agent 的原生存储，接上就能继续干。三步：选源、选目标、执行。</p>
+      </header>
+      <div class="relay-grid">
+        <section class="relay-step" id="relay-step1">
+          <h3><span class="stepnum">1</span><span data-i18n="来源">来源</span></h3>
+          <div id="relay-src-agents" class="chips"></div>
+          <input id="relay-src-search" class="input" type="text" data-i18n-ph="筛选会话" placeholder="筛选会话">
+          <div id="relay-src-list" class="relay-src-list"></div>
+        </section>
+        <section class="relay-step" id="relay-step2">
+          <h3><span class="stepnum">2</span><span data-i18n="目标">目标</span></h3>
+          <div id="relay-tgt-cards" class="tgt-grid"></div>
+        </section>
+        <section class="relay-step" id="relay-step3">
+          <h3><span class="stepnum">3</span><span data-i18n="执行">执行</span></h3>
+          <div id="relay-mode-cards" class="mode-row"></div>
+          <div id="relay-mode-advice" class="muted mode-advice"></div>
+          <div class="field">
+            <label class="flabel" data-i18n="目标项目目录（会话将绑定到该项目）">目标项目目录（会话将绑定到该项目）</label>
+            <div class="dir-row">
+              <input id="relay-cwd" class="input" type="text" placeholder="C:\projects\my-app">
+              <button class="btn" id="relay-browse" data-i18n="浏览">浏览</button>
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" id="relay-backup" checked><span data-i18n="写入前自动备份（可随时在诊断页还原）">写入前自动备份（可随时在诊断页还原）</span></label>
+          <div id="relay-opt-editor" class="opt-editor"></div>
+          <div class="relay-actions">
+            <button class="btn" id="relay-dryrun" title="Dry-run：完整走一遍接力流程但不写盘，报告将写入的路径、条数、token 与转换说明" data-i18n="Dry-run 预览">Dry-run 预览</button>
+            <button class="btn primary" id="relay-run" data-i18n="开始接力">开始接力</button>
+            <span class="muted" id="relay-progress"></span>
+          </div>
+          <div class="muted relay-explain"><span data-icon="info"></span><span data-i18n="Dry-run 会完整走一遍接力流程但不写盘：读源会话、按当前参数计算、合成目标格式，然后报告将写入的路径、条数、token 与转换损失。先用它确认，再开始接力（真实写入前会自动备份）。">Dry-run 会完整走一遍接力流程但不写盘：读源会话、按当前参数计算、合成目标格式，然后报告将写入的路径、条数、token 与转换损失。先用它确认，再开始接力（真实写入前会自动备份）。</span></div>
+          <div id="relay-results"></div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- 活动 -->
+  <section id="view-activity" class="view">
+    <div class="activity-wrap">
+      <header class="relay-head">
+        <h2 data-i18n="活动记录">活动记录</h2>
+        <p class="muted" data-i18n="每一次接力、备份与设置变更都会记录在这里，用于追溯与排查。">每一次接力、备份与设置变更都会记录在这里，用于追溯与排查。</p>
+        <div class="act-filter" id="act-filter">
+          <button class="pill active" data-lv="all" data-i18n="全部">全部</button>
+          <button class="pill" data-lv="error">error</button>
+          <button class="pill" data-lv="warn">warn</button>
+          <button class="pill" data-lv="info">info</button>
+          <button class="pill" data-lv="debug">debug</button>
+          <button class="pill" data-lv="trace">trace</button>
+          <span style="flex:1"></span>
+          <button class="btn small ghost" id="btn-clear-log" data-i18n="清空活动记录">清空活动记录</button>
+        </div>
+      </header>
+      <div id="activity-feed" class="activity-feed"></div>
+    </div>
+  </section>
+
+  <!-- 诊断 -->
+  <section id="view-diagnostics" class="view">
+    <div class="diag-wrap">
+      <header class="relay-head">
+        <h2 data-i18n="诊断">诊断</h2>
+        <p class="muted" data-i18n="各 agent 的存储健康、写前备份管理，以及可附在 issue 里的诊断包。">各 agent 的存储健康、写前备份管理，以及可附在 issue 里的诊断包。</p>
+      </header>
+      <div class="diag-grid">
+        <section>
+          <h3 class="sec-title" data-i18n="存储健康">存储健康</h3>
+          <div id="diag-agents" class="diag-agents"></div>
+          <h3 class="sec-title" data-i18n="备份管理">备份管理</h3>
+          <p class="muted" data-i18n="写入真实存储前的自动快照。还原前会先把当前状态再备份一份。">写入真实存储前的自动快照。还原前会先把当前状态再备份一份。</p>
+          <div id="diag-backups"></div>
+        </section>
+        <section>
+          <h3 class="sec-title" data-i18n="诊断包">诊断包</h3>
+          <p class="muted" data-i18n="不含会话内容：只有存储统计与最近日志，报 issue 时附上。">不含会话内容：只有存储统计与最近日志，报 issue 时附上。</p>
+          <button class="btn" id="btn-diag" data-i18n="导出诊断包">导出诊断包</button>
+          <h3 class="sec-title" data-i18n="原始数据">原始数据</h3>
+          <pre id="diag-raw" class="code"></pre>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- 设置 -->
+  <section id="view-settings" class="view">
+    <div class="settings-wrap">
+      <header class="relay-head">
+        <h2 data-i18n="设置">设置</h2>
+      </header>
+      <div class="settings-grid2">
+        <section class="card">
+          <h3 data-i18n="Agent 实例">Agent 实例</h3>
+          <p class="muted" data-i18n="内置实例可启停；自定义实例指向任意数据目录。">内置实例可启停；自定义实例指向任意数据目录。</p>
+          <div id="instances-table"></div>
+          <details class="add-instance">
+            <summary data-i18n="添加实例">添加实例</summary>
+            <div class="add-form">
+              <label><span data-i18n="类型">类型</span>
+                <select id="add-type">
+                  <option value="claude">Claude Code</option>
+                  <option value="codex">Codex CLI</option>
+                  <option value="zcode">ZCode</option>
+                  <option value="workbuddy">WorkBuddy</option>
+                  <option value="opencode">OpenCode</option>
+                  <option value="gemini">Gemini CLI</option>
+                  <option value="pi">Pi</option>
+                  <option value="openclaw">OpenClaw</option>
+                  <option value="dsh">DeepSeek Harness</option>
+                </select></label>
+              <label><span data-i18n="显示名称（可选）">显示名称（可选）</span>
+                <input type="text" id="add-name"></label>
+              <label><span data-i18n="数据目录">数据目录</span>
+                <div class="dir-row">
+                  <input type="text" id="add-dir">
+                  <button class="btn" id="add-browse" data-i18n="浏览">浏览</button>
+                </div></label>
+              <div class="add-actions">
+                <button class="btn" id="btn-add-detect" data-i18n="检测">检测</button>
+                <button class="btn primary" id="btn-add-instance" data-i18n="添加">添加</button>
+              </div>
+              <div id="add-result" class="muted"></div>
+            </div>
+          </details>
+        </section>
+        <section class="card">
+          <h3 data-i18n="通用">通用</h3>
+          <div class="settings-form">
+            <label><span data-i18n="语言">语言</span>
+              <select id="set-lang"><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
+            <label><span data-i18n="主题">主题</span>
+              <select id="set-theme">
+                <option value="dark" data-i18n="暗色">暗色</option>
+                <option value="light" data-i18n="亮色">亮色</option>
+                <option value="system" data-i18n="跟随系统">跟随系统</option>
+              </select></label>
+            <label><span data-i18n="字体大小">字体大小</span>
+              <select id="set-fontscale">
+                <option value="small" data-i18n="小">小</option>
+                <option value="normal" data-i18n="标准">标准</option>
+                <option value="large" data-i18n="大">大</option>
+              </select></label>
+            <label><span data-i18n="日志级别（默认 info）">日志级别（默认 info）</span>
+              <select id="set-loglevel">
+                <option value="error">error</option><option value="warn">warn</option>
+                <option value="info">info</option><option value="debug">debug</option><option value="trace">trace</option>
+              </select></label>
+            <label><span data-i18n="背景图片">背景图片</span>
+              <div class="dir-row">
+                <input type="text" id="set-bgimage" placeholder="C:\pictures\bg.jpg 或 https://…">
+                <button class="btn" id="btn-clear-bg" data-i18n="清除">清除</button>
+              </div>
+              <span class="muted" data-i18n="填入后即时生效；留空使用纯色背景。">填入后即时生效；留空使用纯色背景。</span></label>
+            <label><span data-i18n="毛玻璃强度">毛玻璃强度</span>
+              <div class="slider-row">
+                <input type="range" id="set-glass" min="0" max="100" value="40">
+                <span class="count" id="glass-val">40%</span>
+              </div>
+              <span class="muted" data-i18n="面板毛玻璃的透明与模糊程度：越高背景图越透、面板越通透。">面板毛玻璃的透明与模糊程度：越高背景图越透、面板越通透。</span></label>
+            <label><span data-i18n="数据目录">数据目录</span>
+              <div class="dir-row">
+                <input type="text" id="set-datadir">
+                <button class="btn" id="set-dir-browse" data-i18n="浏览">浏览</button>
+              </div>
+              <span class="muted" data-i18n="备份、导出、缓存与日志的存放位置。修改后新文件写入新位置。">备份、导出、缓存与日志的存放位置。修改后新文件写入新位置。</span></label>
+            <label class="check"><input type="checkbox" id="set-backup" checked><span data-i18n="写入前自动备份（推荐）">写入前自动备份（推荐）</span></label>
+            <label class="check"><input type="checkbox" id="set-checkup"><span data-i18n="启动时检查新版本（请求一次 GitHub API）">启动时检查新版本（请求一次 GitHub API）</span></label>
+          </div>
+        </section>
+        <section class="card span2">
+          <h3 data-i18n="关于">关于</h3>
+          <div class="about-grid">
+            <div id="about-box"></div>
+            <div class="about-form">
+              <label class="full"><span data-i18n="GitHub 仓库（owner/repo）">GitHub 仓库（owner/repo）</span>
+                <input type="text" id="set-repo" placeholder="yourname/agentrelay"></label>
+              <label><span data-i18n="作者名">作者名</span>
+                <input type="text" id="set-author"></label>
+              <label><span data-i18n="Buy Me a Coffee（可选）">Buy Me a Coffee（可选）</span>
+                <input type="text" id="set-coffee"></label>
+              <label class="full"><span data-i18n="赞助链接（可选）">赞助链接（可选）</span>
+                <input type="text" id="set-sponsor"></label>
+            </div>
+          </div>
+        </section>
+      </div>
+      <button class="btn primary" id="btn-save-settings" data-i18n="保存更改">保存更改</button>
+    </div>
+  </section>
+</main>
+</div>
+
+<!-- 通用弹窗 -->
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="iconbtn" id="modal-close">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- 首次向导 -->
+<div id="wizard" class="modal hidden">
+  <div class="modal-card" style="max-width:560px">
+    <div class="modal-head"><h3 data-i18n="欢迎使用 AgentRelay">欢迎使用 AgentRelay</h3></div>
+    <p class="muted" data-i18n="把 Claude Code、Codex、ZCode、WorkBuddy 等 agent 的会话，原封不动地接力给下一个 agent。先做三个选择：">把 Claude Code、Codex、ZCode、WorkBuddy 等 agent 的会话，原封不动地接力给下一个 agent。先做三个选择：</p>
+    <div class="m-section">
+      <div class="m-label"><span data-i18n="语言">语言</span> / Language</div>
+      <select id="wiz-lang"><option value="zh-CN">中文</option><option value="en-US">English</option></select>
+    </div>
+    <div class="m-section">
+      <div class="m-label" data-i18n="主题">主题</div>
+      <select id="wiz-theme">
+        <option value="dark" data-i18n="暗色">暗色</option>
+        <option value="light" data-i18n="亮色">亮色</option>
+        <option value="system" data-i18n="跟随系统">跟随系统</option>
+      </select>
+    </div>
+    <div class="m-section">
+      <div class="m-label" data-i18n="数据目录（备份、导出、日志的存放位置）">数据目录（备份、导出、日志的存放位置）</div>
+      <div class="dir-row">
+        <input type="text" id="wiz-datadir">
+        <button class="btn" id="wiz-browse" data-i18n="浏览">浏览</button>
+      </div>
+    </div>
+    <div class="wizard-actions">
+      <button class="btn ghost" id="wiz-skip" data-i18n="跳过">跳过</button>
+      <button class="btn primary" id="wiz-done" data-i18n="开始使用">开始使用</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-box"></div>
+<script src="icons.js"></script>
+<script src="i18n.js"></script>
+<script src="momentum.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
