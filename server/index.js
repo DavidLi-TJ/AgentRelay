@@ -11,7 +11,7 @@ const logger = require('./core/logger');
 const { readLogTail, appendLog, nowISO, HOME } = require('./core/util');
 
 const VERSION = require('../package.json').version;
-const PORT = Number(process.env.MOVESESSION_PORT || 17777);
+const PORT = Number(process.env.AGENTRELAY_PORT || process.env.MOVESESSION_PORT || 17777);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
