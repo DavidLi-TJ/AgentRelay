@@ -468,20 +468,22 @@ details .muted { margin-top: 4px; }
 .instt .inst-path { max-width: 300px; word-break: break-all; }
 .instt .inst-status { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
 .instt .inst-status.ok { color: var(--ok); }
-/* 关于卡片：左右两栏，右侧不再留白 */
-.about-grid { display: grid; grid-template-columns: minmax(240px, 5fr) minmax(300px, 7fr); gap: 32px; align-items: start; }
-@media (max-width: 1000px) { .about-grid { grid-template-columns: 1fr; } }
-.about-appname { font-size: 18px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.about-desc { color: var(--text); font-size: 14px; line-height: 22px; margin: 10px 0 16px; max-width: 34em; }
-.about-links { display: flex; gap: 8px; flex-wrap: wrap; }
-.about-form { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.about-form label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 16px; color: var(--muted); }
-.about-form .full { grid-column: 1 / -1; }
-@media (max-width: 640px) { .about-form { grid-template-columns: 1fr; } }
-.about-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; font-size: 14px; line-height: 20px; }
-.about-line b { font-weight: 600; }
-.about-line .ic { width: 15px; height: 15px; }
-.about-ver { color: var(--muted); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+/* 关于卡片（CC Switch 式：品牌 | 文案+Star 内链 | 主色按钮） */
+.about-hero { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.about-brand { display: flex; align-items: center; gap: 12px; }
+.about-logo { color: var(--accent); display: flex; }
+.about-logo .ic { width: 30px; height: 30px; }
+.about-title { display: flex; flex-direction: column; gap: 4px; }
+.about-appname { font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.01em; }
+.about-ver {
+  align-self: flex-start; font-size: 12px; line-height: 16px; color: var(--muted);
+  border: 1px solid var(--border2); border-radius: 999px; padding: 1px 10px;
+}
+.about-plea { flex: 1; min-width: 300px; text-align: right; font-size: 14px; line-height: 24px; color: var(--text); }
+.about-plea a { color: var(--accent2); font-weight: 550; }
+.about-plea a:hover { text-decoration: underline; }
+.about-plea .about-sub { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+.about-star { white-space: nowrap; }
 /* 添加实例（details 折叠面板） */
 .add-instance { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
 .add-instance summary {

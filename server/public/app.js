@@ -112,16 +112,16 @@ function renderAll() {
 }
 
 /* ---------------- 导航 ---------------- */
-$$('.tab').forEach((b) => b.addEventListener('click', () => {
-  $$('.tab').forEach((x) => x.classList.remove('active'));
-  b.classList.add('active');
-  $$('.view').forEach((v) => v.classList.remove('active'));
-  $('#view-' + b.dataset.view).classList.add('active');
-  if (b.dataset.view === 'activity') loadActivity().catch(() => { });
-  if (b.dataset.view === 'diagnostics') loadDiagnostics().catch(() => { });
-  if (b.dataset.view === 'relay') renderRelay();
-  if (b.dataset.view === 'settings') loadSettings().catch(() => { });
-}));
+function activateView(name) {
+  $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.view === name));
+  $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
+  localStorage.setItem('ms-view', name); // 刷新后停留在当前界面
+  if (name === 'activity') loadActivity().catch(() => { });
+  if (name === 'diagnostics') loadDiagnostics().catch(() => { });
+  if (name === 'relay') renderRelay();
+  if (name === 'settings') loadSettings().catch(() => { });
+}
+$$('.tab').forEach((b) => b.addEventListener('click', () => activateView(b.dataset.view)));
 $('#btn-refresh').addEventListener('click', () => { state.searchActive = false; loadAgents(true); toast(t('已刷新')); });
 $('#search').addEventListener('input', () => {
   if (state.searchActive) { state.searchActive = false; renderSessions(); }
@@ -436,10 +436,7 @@ function bindDetailControls() {
     const c = state.current;
     state.relayPreset = [{ instance: c.instance, agent: c.agent, id: c.id, title: c.title }];
     state.relayPresetOptions = currentOptions();
-    $$('.tab').forEach((x) => x.classList.remove('active'));
-    document.querySelector('.tab[data-view="relay"]').classList.add('active');
-    $$('.view').forEach((v) => v.classList.remove('active'));
-    $('#view-relay').classList.add('active');
+    activateView('relay');
     initRelayState();
     state.relay.selected.set(c.instance, new Set([c.id]));
     renderRelay();
@@ -977,14 +974,23 @@ function renderAbout() {
   const c = state.config || {};
   const repo = c.githubRepo || SELF_REPO;
   const safeHref = (u) => (/^https?:\/\//i.test(String(u)) ? String(u) : '#');
-  const by = c.authorName ? ` <span class="about-ver">by ${esc(c.authorName)}</span>` : '';
   box.innerHTML = `
-    <div class="about-appname">AgentRelay <span class="about-ver">v${esc(c.version || '?')}</span>${by}</div>
-    <div class="about-desc">${esc(t('把你的 agent 会话原封不动地接力给下一个 agent。全部本地运行。'))}</div>
-    <div class="about-links">
-      <a class="btn small" href="https://github.com/${esc(repo)}" target="_blank">${icon('star')} GitHub</a>
-      <a class="btn small" href="https://github.com/${esc(repo)}/issues" target="_blank">${icon('info')} ${esc(t('问题反馈'))}</a>
-      <a class="btn small" href="${esc(safeHref(c.sponsorUrl || SELF_SPONSOR))}" target="_blank" rel="noopener noreferrer">${icon('heart')} ${esc(t('赞助'))}</a>
+    <div class="about-hero">
+      <div class="about-brand">
+        <span class="about-logo">${icon('logo')}</span>
+        <div class="about-title">
+          <span class="about-appname">AgentRelay</span>
+          <span class="about-ver">${esc(t('版本'))} v${esc(c.version || '?')}</span>
+        </div>
+      </div>
+      <div class="about-plea">${esc(t('如果 AgentRelay 帮到了你，请在'))}
+        <a href="https://github.com/${esc(repo)}" target="_blank">${esc(t('GitHub 点个 Star'))}</a>${esc(t('，这对我们意义重大 👍'))}
+        <div class="about-sub">
+          <a class="btn small ghost" href="https://github.com/${esc(repo)}/issues" target="_blank">${icon('info')} ${esc(t('问题反馈'))}</a>
+          <a class="btn small ghost" href="${esc(safeHref(c.sponsorUrl || SELF_SPONSOR))}" target="_blank" rel="noopener noreferrer">${icon('heart')} ${esc(t('赞助'))}</a>
+        </div>
+      </div>
+      <a class="btn primary about-star" href="https://github.com/${esc(repo)}" target="_blank">${icon('star')} GitHub</a>
     </div>`;
 }
 
@@ -1209,6 +1215,9 @@ refreshDataIcons();
 bindSettings();
 bindWizard();
 renderQuickStart();
+// 恢复上次停留的界面（刷新不再跳回会话页）
+const savedView = localStorage.getItem('ms-view');
+if (savedView && savedView !== 'sessions' && $('#view-' + savedView)) activateView(savedView);
 maybeShowWizard();
 loadAgents().catch((e) => {
   $('#server-status').style.background = 'var(--err)';
