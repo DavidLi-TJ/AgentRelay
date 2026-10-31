@@ -110,6 +110,15 @@ function callReadSession(type, adapter, sessionId, baseDir) {
     : adapter.readSession(sessionId, baseDir);
   return Promise.resolve(pending).then((msx) => {
     try { msx.lastCompactionIndex = lastCompactionIndex(msx.entries, msx.compactions); } catch { }
+    // 存储签名（主文件 + wal/shm 的 mtime+size）：SQLite 写入多落 WAL，只看主库 mtime 判不出脏
+    try {
+      const f = msx.source && msx.source.file;
+      if (f && fs.existsSync(f)) {
+        msx._storeSig = [f, f + '-wal', f + '-shm'].map((p) => {
+          try { const st = fs.statSync(p); return st.mtimeMs + ':' + st.size; } catch { return '0:0'; }
+        }).join('|');
+      }
+    } catch { }
     return msx;
   });
 }
@@ -145,10 +154,12 @@ function writeTarget(instanceId) {
 
 // 设置页专用：返回全部实例（含已停用的内置实例），enabled 反映真实开关状态
 function instancesForSettings() {
+  const cfg = config();
   const out = [];
   for (const type of Object.keys(ADAPTERS)) {
     const inst = { instanceId: type, type, name: META[type].name, baseDir: null, builtin: true };
-    const enabled = loadInstances().some((i) => i.instanceId === type);
+    // enabled 只反映用户设置（未设置 = 启用）；"未安装"与"已停用"是两回事
+    const enabled = cfg.agents?.[type]?.enabled !== false;
     let probe = { ok: false, storage: null };
     try { probe = ADAPTERS[type].doctor(inst.baseDir); } catch { }
     out.push({ ...inst, enabled, available: enabled && probe.ok, storage: probe.storage || null, sessionCount: 0 });
@@ -180,7 +191,11 @@ function addCustomInstance({ type, name, dataDir }) {
   // 探测：该目录下能否找到存储标志
   const probe = ADAPTERS[type].doctor(abs);
   if (!probe.ok) {
-    const expect = { claude: 'projects 目录', codex: 'sessions 目录 / state_5.sqlite', zcode: 'cli/db/db.sqlite', workbuddy: 'workbuddy.db' }[type];
+    const expect = {
+      claude: 'projects 目录', codex: 'sessions 目录 / state_5.sqlite', zcode: 'cli/db/db.sqlite',
+      workbuddy: 'workbuddy.db', opencode: 'opencode.db', dsh: 'sessions 目录（zstd jsonl）',
+      gemini: 'tmp/*/chats 目录', pi: 'sessions 目录（jsonl）', openclaw: 'sessions 目录（jsonl）',
+    }[type] || '存储目录';
     throw new Error(`在 ${abs} 下未找到 ${type} 的存储（应有 ${expect}）`);
   }
   const cfg = config();

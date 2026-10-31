@@ -68,7 +68,8 @@ function contentBlocksToEntry(content) {
         const out = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '');
         toolResults.push({ type: 'tool_result', for: b.tool_use_id, output: out, isError: !!b.is_error });
       } else if (b.type === 'thinking') {
-        textBlocks.push({ type: 'thinking', text: b.thinking ?? '', signed: true });
+        // 保留原签名：同厂商 T1 写回时透传，resume 才认
+        textBlocks.push({ type: 'thinking', text: b.thinking ?? '', signature: b.signature || '', signed: true });
       } else if (b.type === 'tool_use') {
         textBlocks.push({ type: 'tool_use', id: b.id, name: b.name, input: b.input ?? {} });
       }
@@ -245,7 +246,7 @@ function claudeBlocksFrom(blocks) {
   const out = [];
   for (const b of blocks || []) {
     if (b.type === 'text') out.push({ type: 'text', text: b.text || '' });
-    else if (b.type === 'thinking') out.push({ type: 'thinking', thinking: b.text || '', signature: '' });
+    else if (b.type === 'thinking') out.push({ type: 'thinking', thinking: b.text || '', signature: b.signature || '' });
     else if (b.type === 'tool_use') out.push({ type: 'tool_use', id: b.id || ('toolu_' + randomUUID()), name: b.name, input: b.input ?? {} });
     else if (b.type === 'image') { /* 跨厂商图片 v1 跳过 */ }
   }

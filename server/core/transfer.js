@@ -73,7 +73,7 @@ function writeMsxFile(msx, file) {
     let first = true;
     for (const k of Object.keys(msx)) {
       if (k === 'entries' || k === 'compactions' || k === 'loss') continue;
-      if (msx[k] === undefined) continue; // undefined 会被 JSON.stringify 变成 undefined 字面量，产出非法 JSON
+      if (k.startsWith('_') || msx[k] === undefined) continue; // 内部字段（_fileStat/_storeSig 等）与 undefined 不入导出
       if (!first) ws.write(',');
       first = false;
       ws.write(JSON.stringify(k) + ':' + JSON.stringify(msx[k]));
@@ -160,6 +160,8 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
     });
 
     const tgtInst = targetInstance ? agents.getInstance(targetInstance) : null;
+    // 显式指定了目标实例但解析不到（已删除/停用/拼写错）：报错而不是静默写进默认存储
+    if (targetInstance && !tgtInst) throw new Error('目标实例不存在: ' + targetInstance);
     const tgtBase = tgtInst ? tgtInst.baseDir : null;
     if (mode === 'T2') {
       if (!cwd) throw new Error('T2 注入需要目标项目 cwd');
@@ -268,6 +270,11 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
     };
     (result.ok ? logger.info : logger.error)('transfer', entry);
     if (!result.ok) result.hint = errorHint(result.error);
+    // loss 去重 + 上限：大会话（数万条标记）可能累积出 MB 级清单，MCP/HTTP 响应都要带它
+    if (Array.isArray(result.loss)) {
+      const uniq = [...new Set(result.loss)];
+      result.loss = uniq.length > 200 ? uniq.slice(0, 200).concat([`…另有 ${uniq.length - 200} 条同类说明`]) : uniq;
+    }
     return result;
   }
 }

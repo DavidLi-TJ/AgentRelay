@@ -260,12 +260,17 @@ async function route(req, res, u) {
         const cacheKey = instanceId ? `${instanceId}:${id}` : null;
         if (cacheKey) {
           const cached = cacheGet(cacheKey);
-          // 会话文件在 TTL 内可能被源 agent 追加：按 mtime 校验，脏了就重读
+          // 源存储在 TTL 内可能被追加：按存储签名（文件 + wal/shm 的 mtime+size）判脏
           if (cached) {
             let stale = false;
             try {
               const f = cached.source && cached.source.file;
-              if (f && cached._fileStat && cached._fileStat.mtimeMs) {
+              if (f && cached._storeSig) {
+                const sig = [f, f + '-wal', f + '-shm'].map((p) => {
+                  try { const st = fs.statSync(p); return st.mtimeMs + ':' + st.size; } catch { return '0:0'; }
+                }).join('|');
+                stale = sig !== cached._storeSig;
+              } else if (f && cached._fileStat && cached._fileStat.mtimeMs) {
                 stale = fs.statSync(f).mtimeMs !== cached._fileStat.mtimeMs;
               }
             } catch { stale = true; }
@@ -321,13 +326,21 @@ async function route(req, res, u) {
           'state_5.sqlite': path.join(HOME, '.codex', 'state_5.sqlite'),
           'workbuddy.db': require('./core/workbuddy').dbPath(),
         });
-        // 优先按备份时的原始路径还原（meta.json，支持自定义实例目录）；老备份回落默认路径
+        // 优先按备份时的原始路径还原（meta.json，支持自定义实例目录）；老备份回落默认路径。
+        // meta.json 是备份目录内的普通文件（可能被伪造）：目标文件名必须命中已知存储文件白名单，
+        // 否则一次"还原"就能把任意内容写到任意路径（如启动目录）。
+        const ALLOWED = new Set(['db.sqlite', 'opencode.db', 'state_5.sqlite', 'workbuddy.db', 'session_index.jsonl']);
         let targets = null;
         try {
           const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
-          if (meta && meta.files) targets = meta.files;
+          if (meta && meta.files) {
+            targets = {};
+            for (const [name, dest] of Object.entries(meta.files)) {
+              if (ALLOWED.has(name) && dest && ALLOWED.has(path.basename(String(dest)))) targets[name] = String(dest);
+            }
+          }
         } catch { }
-        if (!targets) targets = { ...KNOWN(), 'session_index.jsonl': path.join(HOME, '.codex', 'session_index.jsonl') };
+        if (!targets || !Object.keys(targets).length) targets = { ...KNOWN(), 'session_index.jsonl': path.join(HOME, '.codex', 'session_index.jsonl') };
         const current = Object.values(targets).filter((f) => f && fs.existsSync(f) && fs.readdirSync(dir).includes(path.basename(f)));
         let safety = null;
         if (current.length) safety = backupFiles(current, 'pre-restore');

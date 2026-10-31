@@ -220,6 +220,13 @@
     '逐条排除': 'Excluded per-entry',
     '条（在会话详情页调整）': ' entries (set on the session page)',
     '启用/停用该 agent 的内置实例': 'Enable or disable this agent’s built-in instance',
+    '请先在来源中选择会话': 'Pick at least one source session first',
+    'MCP 接力调用': 'MCP relay call', 'MCP 接力预览': 'MCP relay preview',
+    '添加 agent 实例': 'Add agent instance',
+    '搜索异常（已跳过该 agent）': 'Search failed (agent skipped)',
+    '已导出诊断包': 'Diagnostics exported',
+    '初始化失败: ': 'Initialization failed: ',
+    '跳过': 'Skip',
   };
   window.MS_I18N = { 'en-US': EN };
   window.MS_LANG = localStorage.getItem('ms-lang') || 'zh-CN';

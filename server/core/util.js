@@ -21,10 +21,19 @@ let _cfg = null;
 
 function config() {
   if (_cfg) return _cfg;
-  try { _cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { _cfg = {}; }
+  try { _cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); }
+  catch {
+    // 读失败（文件被占用/短暂不可读）不缓存空对象：缓存会把"配置消失"传播到
+    // 后续 saveConfig，把用户真实配置持久化抹掉。每次重读，直到恢复正常。
+    return {};
+  }
   return _cfg;
 }
 function saveConfig(patch) {
+  // 文件存在但读不出来时拒绝保存，防止用空配置覆盖用户数据
+  if (fs.existsSync(CONFIG_FILE) && Object.keys(config()).length === 0 && !Object.keys(patch).length) {
+    throw new Error('配置文件不可读，已取消保存以避免覆盖用户配置');
+  }
   _cfg = { ...config(), ...patch };
   ensureDir(path.dirname(CONFIG_FILE));
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(_cfg, null, 2), 'utf8');

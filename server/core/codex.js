@@ -350,33 +350,33 @@ function registerThread({ id, rolloutPath, title, cwd, createdMs, modelProvider,
     set('name', null);
     set('is_pinned', 0);
     set('time_deleted', null);
-    if (cols.includes('project_id')) {
-      let projId = null;
-      try {
-        const hasProjects = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get();
-        if (hasProjects && tplRow && tplRow.project_id) {
-          const pcols = db.prepare("PRAGMA table_info(projects)").all().map((c) => c.name);
-          const tplProj = db.prepare('SELECT * FROM projects WHERE id = ?').get(tplRow.project_id);
-          const cwdCol = pcols.find((c) => ['cwd', 'path', 'directory', 'root'].includes(c));
-          const exist = cwdCol ? db.prepare(`SELECT id FROM projects WHERE ${cwdCol} = ?`).get((process.platform === 'win32' ? '\\\\?\\' : '') + cwd) || db.prepare(`SELECT id FROM projects WHERE ${cwdCol} = ?`).get(cwd) : null;
-          if (exist) projId = exist.id;
-          else if (tplProj) {
-            const newRow = { ...tplProj };
-            newRow.id = uuidV7Like();
-            if (cwdCol) newRow[cwdCol] = (process.platform === 'win32' ? '\\\\?\\' : '') + cwd;
-            const names = Object.keys(newRow).filter((k) => pcols.includes(k));
-            db.prepare(`INSERT INTO projects (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`)
-              .run(...names.map((n) => newRow[n]));
-            projId = newRow.id;
-          }
-        }
-      } catch { projId = null; }
-      row.project_id = projId;
-    }
     const names = Object.keys(row);
-    // projects + threads 两个 INSERT 包事务：中途失败不留孤儿 project 行
+    // projects + threads 两个写入包在同一事务：threads 失败时 projects 一起回滚，不留孤儿行
     db.exec('BEGIN');
     try {
+      if (cols.includes('project_id')) {
+        let projId = null;
+        try {
+          const hasProjects = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get();
+          if (hasProjects && tplRow && tplRow.project_id) {
+            const pcols = db.prepare("PRAGMA table_info(projects)").all().map((c) => c.name);
+            const tplProj = db.prepare('SELECT * FROM projects WHERE id = ?').get(tplRow.project_id);
+            const cwdCol = pcols.find((c) => ['cwd', 'path', 'directory', 'root'].includes(c));
+            const exist = cwdCol ? db.prepare(`SELECT id FROM projects WHERE ${cwdCol} = ?`).get((process.platform === 'win32' ? '\\\\?\\' : '') + cwd) || db.prepare(`SELECT id FROM projects WHERE ${cwdCol} = ?`).get(cwd) : null;
+            if (exist) projId = exist.id;
+            else if (tplProj) {
+              const newRow = { ...tplProj };
+              newRow.id = uuidV7Like();
+              if (cwdCol) newRow[cwdCol] = (process.platform === 'win32' ? '\\\\?\\' : '') + cwd;
+              const pnames = Object.keys(newRow).filter((k) => pcols.includes(k));
+              db.prepare(`INSERT INTO projects (${pnames.map((n) => '"' + n + '"').join(',')}) VALUES (${pnames.map(() => '?').join(',')})`)
+                .run(...pnames.map((n) => newRow[n]));
+              projId = newRow.id;
+            }
+          }
+        } catch { projId = null; }
+        row.project_id = projId;
+      }
       db.prepare(`INSERT INTO threads (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`)
         .run(...names.map((n) => row[n]));
       db.exec('COMMIT');

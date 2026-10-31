@@ -884,7 +884,7 @@ async function loadSettings() {
   try { state.config = await api('/api/config'); } catch { state.config = {}; }
   // 设置页表格用 /api/instances：包含已停用的内置实例，开关反映真实状态
   try { renderInstancesTable(await api('/api/instances')); }
-  catch { renderInstancesTable(state.instances); }
+  catch { renderInstancesTable(state.instances.map((x) => ({ ...x, enabled: x.enabled !== false }))); }
   renderAbout();
   $('#set-lang').value = window.MS_LANG;
   $('#set-theme').value = localStorage.getItem('ms-theme') || 'dark';

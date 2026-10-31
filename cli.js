@@ -13,7 +13,9 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
-      const key = a.slice(2);
+      let key = a.slice(2);
+      const eq = key.indexOf('=');
+      if (eq !== -1) { args[key.slice(0, eq)] = key.slice(eq + 1); continue; } // 支持 --flag=value
       const next = argv[i + 1];
       if (next === undefined || next.startsWith('--')) args[key] = true;
       else { args[key] = next; i++; }
