@@ -38,7 +38,7 @@ Nothing is summarized, nothing is uploaded, and there is nothing to install — 
 
 Windows 10/11, Node.js 22.5 or newer (for the built-in `node:sqlite` module). No `npm install` — there are no dependencies to install.
 
-**Double-click `启动AgentRelay.bat`.** That is the whole setup. A browser window opens at `http://127.0.0.1:17777`.
+**Double-click `StartAgentRelay.bat`.** That is the whole setup. A browser window opens at `http://127.0.0.1:17777`.
 
 The first-run wizard detects which agents you have and shows a live session count for each. From here everything is point-and-click:
 
@@ -122,7 +122,7 @@ The backup runs first, writes are transactional or atomic, and the Diagnostics p
 
 <details>
 <summary>Will the target agent actually accept the session?</summary>
-T0 is a native copy, so resume just works. T1 is written into the target's native store and registered. T2 hands the target a verbatim transcript plus a kickoff prompt. All three were verified against real agent storage; see <a href="VERIFICATION.md">VERIFICATION.md</a>.
+T0 is a native copy, so resume just works. T1 is written into the target's native store and registered. T2 hands the target a verbatim transcript plus a kickoff prompt. All three were verified against real agent storage on Windows (real sessions, real resume).
 </details>
 
 <details>

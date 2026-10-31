@@ -47,3 +47,6 @@ docs/assets/_draft/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# 本机验证记录（含真实会话信息，只留本地）
+VERIFICATION.md

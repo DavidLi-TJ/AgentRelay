@@ -38,7 +38,7 @@ AgentRelay 搬的是会话本身：每条消息、每次工具调用和结果、
 
 Windows 10/11，Node.js 22.5 以上（为了内置的 `node:sqlite`）。零 npm 依赖，不需要 `npm install`。
 
-**双击 `启动AgentRelay.bat`**，装完事。浏览器自动打开 `http://127.0.0.1:17777`。
+**双击 `StartAgentRelay.bat`**，装完事。浏览器自动打开 `http://127.0.0.1:17777`。
 
 首次运行向导会探测你装了哪些 agent，并实时显示各自的会话数。之后全程点鼠标：
 
@@ -122,7 +122,7 @@ claude mcp add agentrelay -- node C:\path\to\agentrelay\cli.js mcp
 
 <details>
 <summary>目标 agent 真的认这场会话吗？</summary>
-T0 是原生复制，resume 直接续。T1 写入目标原生存储并注册。T2 给目标一份逐字 transcript 加启动指令。三种级别都用真实 agent 存储验证过，见 <a href="VERIFICATION.md">VERIFICATION.md</a>。
+T0 是原生复制，resume 直接续。T1 写入目标原生存储并注册。T2 给目标一份逐字 transcript 加启动指令。三种级别都用真实 agent 存储验证过（真实会话、真实 resume）。
 </details>
 
 <details>
