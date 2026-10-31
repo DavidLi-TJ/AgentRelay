@@ -219,6 +219,7 @@
     '按正则脱敏疑似秘钥/凭据后再写入': 'Redact suspected keys/credentials by regex before writing',
     '逐条排除': 'Excluded per-entry',
     '条（在会话详情页调整）': ' entries (set on the session page)',
+    '启用/停用该 agent 的内置实例': 'Enable or disable this agent’s built-in instance',
   };
   window.MS_I18N = { 'en-US': EN };
   window.MS_LANG = localStorage.getItem('ms-lang') || 'zh-CN';

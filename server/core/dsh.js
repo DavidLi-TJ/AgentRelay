@@ -65,8 +65,10 @@ function parseDsh(text) {
 
 function nestedText(content) {
   // tool/result 的 content: [{type:'tool-result', toolCallId, content:[{type:'text',text}]}]
-  return (content || []).map((b) => {
-    if (b.type === 'tool-result') return (b.content || []).filter((x) => x.type === 'text').map((x) => x.text).join('');
+  // 归一化：字符串型 content（summary/用户消息变体）按单条文本处理
+  const arr = Array.isArray(content) ? content : (content == null ? [] : [{ type: 'text', text: String(content) }]);
+  return arr.map((b) => {
+    if (b.type === 'tool-result') return (Array.isArray(b.content) ? b.content : (b.content == null ? [] : [{ type: 'text', text: String(b.content) }])).filter((x) => x.type === 'text').map((x) => x.text).join('');
     if (b.type === 'text') return b.text || '';
     return '';
   }).join('');
@@ -109,12 +111,14 @@ async function readSession(sessionId, baseDir) {
     const ts = ev.time ? new Date(ev.time).toISOString() : null;
     const d = ev.data || {};
     if (ev.type === 'user/message') {
-      const texts = (d.content || []).filter((b) => b.type === 'text').map((b) => ({ type: 'text', text: b.text || '' }));
+      const ucontent = Array.isArray(d.content) ? d.content : (d.content == null ? [] : [{ type: 'text', text: String(d.content) }]);
+      const texts = ucontent.filter((b) => b.type === 'text').map((b) => ({ type: 'text', text: b.text || '' }));
       if (texts.length) entries.push({ id: d.id || 'u' + ev.seq, ts, role: 'user', kind: 'text', blocks: texts, meta: {} });
     } else if (ev.type === 'assistant/message') {
       const m = d.message || {};
       const blocks = [];
-      for (const b of m.content || []) {
+      const acontent = Array.isArray(m.content) ? m.content : (m.content == null ? [] : [{ type: 'text', text: String(m.content) }]);
+      for (const b of acontent) {
         if (b.type === 'text' && b.text) blocks.push({ type: 'text', text: b.text });
         else if (b.type === 'reasoning' && b.text) blocks.push({ type: 'thinking', text: b.text });
         // tool-call 块跳过：独立的 tool/call 事件承载调用与结果，避免重复

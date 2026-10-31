@@ -100,17 +100,18 @@ async function route(cmd, args) {
       sourceAgent: msx.source.agent, sessionId: msx.source.session_id,
       targetAgent: target, cwd: args.cwd, mode: args.mode || 'T1',
       options: selectionFromArgs(args), dbFileOverride: args['db-file'] || null,
+      dryRun: !!args['dry-run'],
       // 文件里带 entries 时直接使用（保留用户对导出文件的修改，如脱敏/裁剪）
       msxOverride: Array.isArray(msx.entries) && msx.entries.length ? msx : null,
     });
     console.log(JSON.stringify(r, null, 2));
   } else if (cmd === 'transfer') {
-    // transfer --from claude:<id> --to codex [--cwd path] [--mode T1]
+    // transfer --from claude:<id> --to codex [--cwd path] [--mode T1] [--dry-run]
     const [srcAgent, srcId] = String(args.from || '').split(':');
     const results = await transferMod.transferOne({
       sourceAgent: srcAgent, sessionId: srcId, targetAgent: args.to,
       cwd: args.cwd, mode: args.mode || 'T1', options: selectionFromArgs(args),
-      dbFileOverride: args['db-file'] || null,
+      dbFileOverride: args['db-file'] || null, dryRun: !!args['dry-run'],
     });
     console.log(JSON.stringify(results, null, 2));
   } else if (cmd === 'doctor') {
@@ -133,8 +134,8 @@ async function route(cmd, args) {
   node cli.js show <agent> <sessionId>        查看会话内容
   node cli.js export <agent> <sessionId> [--out 文件] [--from N --to N] [--no-thinking]
                                               [--truncate KB] [--budget tokens] [--redact]
-  node cli.js load <file.arx.json>（兼容读取旧 .msx.json） --into claude|codex|zcode --cwd <项目路径> [--mode T1|T2]
-  node cli.js transfer --from <agent>:<sessionId> --to <agent> --cwd <路径> [--mode T0|T1|T2]
+  node cli.js load <file.arx.json>（兼容读取旧 .msx.json） --into claude|codex|zcode --cwd <项目路径> [--mode T1|T2] [--dry-run]
+  node cli.js transfer --from <agent>:<sessionId> --to <agent> --cwd <路径> [--mode T0|T1|T2] [--dry-run]
   node cli.js doctor                          检查各 agent 存储
   node cli.js serve                           启动 GUI (http://127.0.0.1:17777)
   node cli.js mcp                             启动 MCP server（供 Claude Code/Codex/ZCode 等 agent 调用）

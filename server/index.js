@@ -52,7 +52,7 @@ function readBody(req, res) {
     req.on('end', () => {
       if (rejected) return;
       try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); }
-      catch (e) { reject(e); }
+      catch (e) { e.badRequest = true; reject(e); }
     });
     req.on('error', () => { /* 客户端中断等，已处理 */ });
   });
@@ -84,21 +84,8 @@ async function route(req, res, u) {
       return send(res, 200, readLogTail(limit));
     }
     if (p === '/api/instances') {
-      const body = await readBody(req, res);
-      try {
-        if (body.action === 'remove') return send(res, 200, agents.removeCustomInstance(body.instanceId));
-        if (body.action === 'setEnabled') return send(res, 200, agents.setTypeEnabled(body.type, body.enabled));
-        if (body.action === 'detect') {
-          // 仅探测不保存（验收 #16 修复：detect 不得有副作用）
-          if (!agents.ADAPTERS[body.type]) throw new Error('未知 agent 类型: ' + body.type);
-          if (!body.dataDir || !require('fs').existsSync(body.dataDir)) throw new Error('目录不存在: ' + body.dataDir);
-          const probe = agents.ADAPTERS[body.type].doctor(body.dataDir);
-          return send(res, 200, { detected: probe.ok, storage: probe.storage, sessions: probe.sessionFiles || 0 });
-        }
-        const inst = agents.addCustomInstance({ type: body.type, name: body.name, dataDir: body.dataDir });
-        logger.info('instance-add', { type: body.type, dataDir: body.dataDir });
-        return send(res, 200, inst);
-      } catch (e) { return send(res, 400, { error: e.message }); }
+      // GET：仅读取（含已停用的内置实例，供设置页渲染真实开关状态）；变更一律走 POST
+      return send(res, 200, agents.instancesForSettings());
     }
     if (p === '/api/config') {
       const { config: cfgAll } = require('./core/util');
@@ -108,8 +95,13 @@ async function route(req, res, u) {
       // 本地目录浏览（供数据目录选择器使用；仅列子目录，Host 校验已生效）
       let dir = u.searchParams.get('path') || '';
       if (!dir) {
+        // 根列表按平台：Windows 枚举盘符，POSIX 从 / 开始
         const roots = [];
-        for (const d of ['C:', 'D:', 'E:']) { const p2 = d + path.sep; try { if (fs.existsSync(p2)) roots.push(p2); } catch { } }
+        if (process.platform === 'win32') {
+          for (const d of ['C:', 'D:', 'E:', 'F:']) { const p2 = d + path.sep; try { if (fs.existsSync(p2)) roots.push(p2); } catch { } }
+        } else {
+          roots.push('/');
+        }
         return send(res, 200, { path: '', parent: null, dirs: roots.map((n) => ({ name: n, path: n })) });
       }
       try {
@@ -160,14 +152,32 @@ async function route(req, res, u) {
               const file = sess.file;
               if (!file || !fs.existsSync(file)) continue;
               try {
-                const text = fs.readFileSync(file, 'utf8');
-                if (!text.toLowerCase().includes(q.toLowerCase())) continue;
-                const lines = text.split('\n');
-                const hitLine = lines.find((l) => l.toLowerCase().includes(q.toLowerCase())) || '';
-                const parsed = safeParse(hitLine, {}) || {};
-                const sample = truncateStr(JSON.stringify(parsed).slice(0, 260), 240);
-                results.push({ agent: type, instance: inst.id, sessionId: sess.id, title: sess.title, cwd: sess.cwd, hits: lines.filter((l) => l.toLowerCase().includes(q.toLowerCase())).length, sample });
-                if (results.length > 60) break;
+                // 流式逐行搜索：WorkBuddy 有 745MB 的会话文件，整读会冻结事件循环
+                let hits = 0, sample = '';
+                await new Promise((resolve) => {
+                  const rl = require('readline').createInterface({
+                    input: fs.createReadStream(file, { encoding: 'utf8', highWaterMark: 1024 * 1024 }),
+                    crlfDelay: Infinity,
+                  });
+                  const needle = q.toLowerCase();
+                  rl.on('line', (line) => {
+                    const low = line.toLowerCase();
+                    if (low.includes(needle)) {
+                      hits++;
+                      if (!sample) {
+                        const parsed = safeParse(line, {}) || {};
+                        sample = truncateStr(JSON.stringify(parsed).slice(0, 260), 240);
+                      }
+                    }
+                    if (Date.now() > deadline) rl.close();
+                  });
+                  rl.on('close', resolve);
+                  rl.on('error', () => resolve());
+                });
+                if (hits) {
+                  results.push({ agent: type, instance: inst.id, sessionId: sess.id, title: sess.title, cwd: sess.cwd, hits, sample });
+                  if (results.length > 60) break;
+                }
               } catch { }
             }
           }
@@ -249,7 +259,18 @@ async function route(req, res, u) {
         let msx = null;
         const cacheKey = instanceId ? `${instanceId}:${id}` : null;
         if (cacheKey) {
-          msx = cacheGet(cacheKey);
+          const cached = cacheGet(cacheKey);
+          // 会话文件在 TTL 内可能被源 agent 追加：按 mtime 校验，脏了就重读
+          if (cached) {
+            let stale = false;
+            try {
+              const f = cached.source && cached.source.file;
+              if (f && cached._fileStat && cached._fileStat.mtimeMs) {
+                stale = fs.statSync(f).mtimeMs !== cached._fileStat.mtimeMs;
+              }
+            } catch { stale = true; }
+            if (!stale) msx = cached;
+          }
         }
         if (!msx) {
           msx = instanceId ? await agents.readMsxInstance(instanceId, id) : await agents.readMsx(agent, id);
@@ -286,7 +307,8 @@ async function route(req, res, u) {
       const root = path.resolve(backupDir());
       const dir = path.resolve(root, String(body.dir || ''));
       const rel = path.relative(root, dir);
-      if (rel.startsWith('..') || !fs.existsSync(dir)) return send(res, 404, { error: '备份目录不存在' });
+      // 空串（dir===root）与绝对路径（Windows 跨盘符时 path.relative 返回绝对路径）都必须拒绝
+      if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || !fs.existsSync(dir)) return send(res, 404, { error: '备份目录不存在' });
       if (body.action === 'delete') {
         fs.rmSync(dir, { recursive: true, force: true });
         logger.info('backup-delete', { dir });
@@ -299,13 +321,21 @@ async function route(req, res, u) {
           'state_5.sqlite': path.join(HOME, '.codex', 'state_5.sqlite'),
           'workbuddy.db': require('./core/workbuddy').dbPath(),
         });
-        const current = Object.values(KNOWN()).filter((f) => fs.existsSync(f) && fs.readdirSync(dir).includes(path.basename(f)));
+        // 优先按备份时的原始路径还原（meta.json，支持自定义实例目录）；老备份回落默认路径
+        let targets = null;
+        try {
+          const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+          if (meta && meta.files) targets = meta.files;
+        } catch { }
+        if (!targets) targets = { ...KNOWN(), 'session_index.jsonl': path.join(HOME, '.codex', 'session_index.jsonl') };
+        const current = Object.values(targets).filter((f) => f && fs.existsSync(f) && fs.readdirSync(dir).includes(path.basename(f)));
         let safety = null;
         if (current.length) safety = backupFiles(current, 'pre-restore');
         const restored = [];
         for (const f of fs.readdirSync(dir)) {
-          const dest = KNOWN()[f] || (f === 'session_index.jsonl' ? path.join(HOME, '.codex', 'session_index.jsonl') : null);
+          const dest = targets[f];
           if (dest) {
+            fs.mkdirSync(path.dirname(dest), { recursive: true });
             fs.copyFileSync(path.join(dir, f), dest);
             if (/\.(sqlite|db)$/.test(f)) {
               for (const ext of ['-wal', '-shm']) { try { fs.rmSync(dest + ext, { force: true }); } catch { } }
@@ -374,7 +404,7 @@ async function route(req, res, u) {
     if (p === '/api/preview' || p === '/api/transfer') {
       const body = await readBody(req, res);
       try {
-        const { sourceAgent, sourceInstance, sessionId, options = {}, targets = [], dryRun = false } = body;
+        const { sourceAgent, sourceInstance, sessionId, options = {}, targets = [], dryRun = false, backup = null } = body;
         if ((!sourceAgent && !sourceInstance) || !sessionId) return send(res, 400, { error: 'sourceAgent/sourceInstance 与 sessionId 必填' });
         if (p === '/api/preview') {
           let src;
@@ -383,12 +413,13 @@ async function route(req, res, u) {
           const loss = [];
           const { selectEntries, redactMsx, computeStats } = require('./core/msx');
           const entries = selectEntries(src.entries, options, loss);
-          let msx = { ...src, entries, loss };
+          // 适配器级损失（sidechain 跳过等）与选择损失合并，预览与真实接力口径一致
+          let msx = { ...src, entries, loss: [...(src.loss || []), ...loss] };
           if (options.redact) msx = redactMsx(msx);
           return send(res, 200, { stats: computeStats(msx.entries), loss: [...new Set(msx.loss || [])], entries: msx.entries.map(summarizeEntry) });
         }
         if (!targets || !targets.length) return send(res, 400, { error: 'targets 不能为空' });
-        const results = await transfer.transfer({ sourceAgent, sessionId, targets, options, dryRun, sourceInstance });
+        const results = await transfer.transfer({ sourceAgent, sessionId, targets, options, dryRun, sourceInstance, backup });
         return send(res, 200, { results });
       } catch (e) {
         logger.error('api-error', { path: p, error: e.message });
@@ -408,7 +439,7 @@ function serveStatic(req, res, u) {
   let p = u.pathname === '/' ? '/index.html' : u.pathname;
   p = path.normalize(p).replace(/^(\.\.[/\\])+/, '');
   const file = path.join(PUBLIC_DIR, p);
-  if (!file.startsWith(PUBLIC_DIR)) { res.writeHead(403); return res.end('forbidden'); }
+  if (path.relative(PUBLIC_DIR, file).startsWith('..')) { res.writeHead(403); return res.end('forbidden'); }
   if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
     // SPA 回退
     const index = path.join(PUBLIC_DIR, 'index.html');
@@ -442,6 +473,7 @@ const server = http.createServer(async (req, res) => {
     return serveStatic(req, res, u);
   } catch (e) {
     if (res.headersSent) { try { res.end(); } catch { } return; }
+    if (e && e.badRequest) return send(res, 400, { error: 'invalid JSON body' });
     return send(res, 500, { error: e.message });
   }
 });

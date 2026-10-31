@@ -22,6 +22,8 @@ AgentRelay 搬的是会话本身：每条消息、每次工具调用和结果、
 
 不摘要、不上传、不安装——整个软件就是一堆 JS 文件，用你机器上已有的 Node.js 跑起来。
 
+还有一件事值得直说：以上全部发生在一个网页里。同类工具——ccusage、claude-code-history-viewer、各种 handoff 脚本——都是命令行命令，要记参数、要盯 JSON 输出。AgentRelay 给同一件事做了真正的界面：agent 是卡片，会话是可搜索的列表，对话逐条铺开带勾选框。会用网页就会接力。CLI 和 MCP 接口都在，但它们是侧门，不是正门。
+
 ## 功能一览
 
 - **一个页面看全所有会话**：九家 agent（Claude Code、Codex CLI、ZCode、WorkBuddy、OpenCode、DeepSeek Harness、Gemini CLI、Pi、OpenClaw）的会话统一浏览、筛选、全文搜索，右侧逐字预览。
@@ -102,7 +104,7 @@ claude mcp add agentrelay -- node C:\path\to\agentrelay\cli.js mcp
 
 ## 安全
 
-真实写入之前一定有备份：SQLite 一致性快照（`VACUUM INTO`，文件型存储直接复制），最近 20 份放在诊断页标出的备份根目录里，一键还原。数据库写入包在事务里，失败回滚；文件写入走临时文件加 rename，绝不碰源会话。MCP 通道不显式给 `confirm: true` 就只做 dry-run。本地服务校验 Host 头、只收 JSON POST、请求体上限 64MB。没有遥测；除了你在设置里手动开启的版本检查，没有任何网络请求。
+凡是可能覆盖既有数据的写入，之前都先备份：SQLite 一致性快照（`VACUUM INTO`，文件型存储直接复制），最近 20 份放在诊断页标出的备份根目录里，一键还原。T0/T1 写入数据库目标、以及 OpenCode/WorkBuddy/Codex/ZCode 的每次写入都享受这份快照；只新建文件、不覆盖任何东西的写入（T2 转写、往空项目目录首次写入 Claude）不需要备份。数据库写入包在事务里，失败回滚；文件写入走临时文件加 rename，绝不碰源会话。MCP 通道不显式给 `confirm: true` 就只做 dry-run。本地服务校验 Host 头、只收 JSON POST、请求体上限 64MB。没有遥测；除了你在设置里手动开启的版本检查，没有任何网络请求。
 
 ## 数据在哪
 
@@ -155,3 +157,5 @@ node scripts/sandbox-test.js
 ## License
 
 [MIT](LICENSE)
+
+欢迎提交 Issue 和 PR——报 bug 时附上诊断包（诊断页 → 导出）修复最快。

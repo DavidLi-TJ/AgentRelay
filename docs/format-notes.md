@@ -70,7 +70,7 @@
 ## 5. ARX v1 中间格式（内部沿用 MSX 代码名）（本项目真源）
 ```
 {
-  msx: 1, id: <新uuid>, created_at: ISO,
+  arx: 1, id: <新uuid>, created_at: ISO,
   source: {agent:'claude-code'|'codex'|'zcode'|'workbuddy', agent_version, session_id, title, file},
   project: {cwd, gitBranch?},
   env: {model?, provider?, cli_version?, instructions?},

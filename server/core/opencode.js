@@ -212,7 +212,7 @@ function writeSession(msx, { cwd, newId, dbFile, baseDir } = {}) {
         db.prepare(`INSERT INTO part (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`).run(...names.map((n) => row[n]));
       };
 
-      let seq = 0, prevMsgId = null;
+      let seq = 0, prevMsgId = null, orphanSeq = 10000;
       for (const e of msx.entries || []) {
         const ms = e.ts ? isoToMs(e.ts) : now;
         if (e.kind === 'compaction') { loss.push('OpenCode 目标：跳过 compaction 标记'); continue; }
@@ -253,7 +253,8 @@ function writeSession(msx, { cwd, newId, dbFile, baseDir } = {}) {
           for (const b of e.blocks || []) {
             if (b.type !== 'tool_result' || resultFor.get(b.for)) continue;
             if (!prevMsgId) { loss.push('OpenCode 目标：丢弃孤儿工具结果 1 条'); continue; }
-            insertPart({ id: partId(), message_id: prevMsgId, session_id: id, time_created: ms, time_updated: ms, data: JSON.stringify({ type: 'tool', callID: b.for, tool: 'tool', state: { status: b.isError ? 'error' : 'completed', input: {}, output: typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '') } }), sequence: 10000 });
+            orphanSeq++; // 递增避免同消息内多个孤儿结果 sequence 撞车
+            insertPart({ id: partId(), message_id: prevMsgId, session_id: id, time_created: ms, time_updated: ms, data: JSON.stringify({ type: 'tool', callID: b.for, tool: 'tool', state: { status: b.isError ? 'error' : 'completed', input: {}, output: typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '') } }), sequence: orphanSeq });
           }
         }
       }

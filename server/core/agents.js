@@ -143,6 +143,25 @@ function writeTarget(instanceId) {
   return { inst, adapter: ADAPTERS[inst.type] };
 }
 
+// 设置页专用：返回全部实例（含已停用的内置实例），enabled 反映真实开关状态
+function instancesForSettings() {
+  const out = [];
+  for (const type of Object.keys(ADAPTERS)) {
+    const inst = { instanceId: type, type, name: META[type].name, baseDir: null, builtin: true };
+    const enabled = loadInstances().some((i) => i.instanceId === type);
+    let probe = { ok: false, storage: null };
+    try { probe = ADAPTERS[type].doctor(inst.baseDir); } catch { }
+    out.push({ ...inst, enabled, available: enabled && probe.ok, storage: probe.storage || null, sessionCount: 0 });
+  }
+  for (const inst of loadInstances()) {
+    if (inst.builtin) continue;
+    let probe = { ok: false, storage: null };
+    try { probe = ADAPTERS[inst.type].doctor(inst.baseDir); } catch { }
+    out.push({ ...inst, enabled: true, available: probe.ok, storage: probe.storage || inst.baseDir, sessionCount: 0 });
+  }
+  return out;
+}
+
 // ---- 管理：启用/停用 + 自定义实例 ----
 function setTypeEnabled(type, enabled) {
   if (!META[type]) throw new Error('未知 agent 类型: ' + type);
@@ -239,6 +258,9 @@ function detectWorkbuddy() {
     path.join(HOME, 'AppData', 'Roaming', 'WorkBuddy AI'),
     path.join(HOME, 'AppData', 'Local', 'workbuddy-ai'),
     path.join(HOME, 'workbuddy'),
+    // macOS 桌面端常见容器路径
+    path.join(HOME, 'Library', 'Application Support', 'WorkBuddy AI'),
+    path.join(HOME, 'Library', 'Application Support', 'workbuddy-ai'),
   ];
   const found = candidates.filter((p) => fs.existsSync(p));
   let dbs = [];
@@ -262,7 +284,7 @@ function findSqlite(dir, depth) {
 }
 
 module.exports = {
-  META, ADAPTERS, loadInstances, getInstance, instanceSummary, listInstances, allInstances,
+  META, ADAPTERS, loadInstances, getInstance, instanceSummary, listInstances, allInstances, instancesForSettings,
   listInstanceSessions, bustListCache, readMsxInstance, readMsx, writeTarget,
   setTypeEnabled, addCustomInstance, removeCustomInstance,
   agentSummary, listAgents, listTargets, detectWorkbuddy,

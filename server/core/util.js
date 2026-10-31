@@ -163,12 +163,15 @@ function truncateStr(s, n) {
 }
 
 function backupFiles(files, label = 'op') {
-  const dir = path.join(backupDir(), `${new Date().toISOString().replace(/[:.]/g, '-')}-${label}`);
+  const safeLabel = String(label || 'op').replace(/[^\w-]/g, '') || 'op';
+  const dir = path.join(backupDir(), `${new Date().toISOString().replace(/[:.]/g, '-')}-${safeLabel}`);
   ensureDir(dir);
   const copied = [];
+  const origins = {};
   for (const f of files) {
     if (f && fs.existsSync(f)) {
       const dest = path.join(dir, path.basename(f));
+      origins[path.basename(f)] = f; // 还原时按原始路径写回（支持自定义实例目录）
       // SQLite 活跃库：优先用 VACUUM INTO 做一致性快照（db/-wal/-shm 三件套逐个拷贝可能撕裂）
       if (/\.sqlite$/.test(f)) {
         try {
@@ -184,6 +187,7 @@ function backupFiles(files, label = 'op') {
       copied.push(dest);
     }
   }
+  try { fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ files: origins }, null, 2), 'utf8'); } catch { }
   pruneBackups(20);
   try { require('./logger').info('backup', { dir, files: copied.length }); } catch { }
   return { dir, copied };

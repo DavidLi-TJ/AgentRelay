@@ -81,7 +81,8 @@ function copyText(txt) {
 }
 function shortPath(p) {
   if (!p) return '';
-  return String(p).replace(/^C:\\Users\\[^\\]+/i, '~').replace(/\\/g, '/');
+  // Windows C:\Users\xxx → ~ ；POSIX /home/xxx → ~
+  return String(p).replace(/^C:\\Users\\[^\\]+/i, '~').replace(/^\/home\/[^/]+/i, '~').replace(/\\/g, '/');
 }
 
 /* ---------------- 主题 / 语言 ---------------- */
@@ -374,13 +375,16 @@ function renderEntries() {
 
 async function loadMoreEntries() {
   const c = state.current;
-  if (!c || !c.hasMore) return;
+  if (!c || !c.hasMore || c.loading) return;
+  c.loading = true;
+  const base = c.msx.entries.length; // 在途期间防重复拼接
   try {
-    const next = await api(`/api/session?instance=${encodeURIComponent(c.instance)}&id=${encodeURIComponent(c.id)}&offset=${c.msx.entries.length}&limit=400&preview=0`);
-    c.msx.entries = c.msx.entries.concat(next.entries);
+    const next = await api(`/api/session?instance=${encodeURIComponent(c.instance)}&id=${encodeURIComponent(c.id)}&offset=${base}&limit=400&preview=0`);
+    if (c.msx.entries.length === base) c.msx.entries = c.msx.entries.concat(next.entries);
     c.hasMore = !!next.hasMore;
     renderEntries();
   } catch (e) { toast(t('加载失败: ') + e.message, 'err'); }
+  finally { c.loading = false; }
 }
 
 function bindDetailControls() {
@@ -440,9 +444,10 @@ function bindDetailControls() {
   $('#btn-export').addEventListener('click', exportMsx);
 }
 
-let previewTimer = null;
+let previewTimer = null, previewSeq = 0;
 function refreshPreview() {
   clearTimeout(previewTimer);
+  const seq = ++previewSeq;
   previewTimer = setTimeout(async () => {
     if (!state.current) return;
     const { instance, agent, id } = state.current;
@@ -451,11 +456,13 @@ function refreshPreview() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceInstance: instance, sourceAgent: agent, sessionId: id, options: currentOptions() }),
       });
+      if (seq !== previewSeq) return; // 旧响应后到，丢弃
       $('#preview-est').textContent =
         `${t('将接力')} ${r.stats.entries} ${t('条')} · ${r.stats.userTurns} ${t('轮')} · ${r.stats.toolCalls} ${t('工具调用')} · ~${fmtTokens(r.stats.approxTokens)} tokens` +
         (r.loss.length ? ` · ${r.loss.length} ${t('转换说明')}` : '');
       $('#preview-est').title = r.loss.join('\n') || '';
     } catch (e) {
+      if (seq !== previewSeq) return;
       $('#preview-est').textContent = t('加载失败: ') + e.message;
     }
   }, 250);
@@ -728,12 +735,16 @@ async function runRelay(dryRun) {
     for (const iid of m.targets) {
       const inst = state.instances.find((x) => x.id === iid);
       try {
+        // 单源时仅当与详情页当前会话一致才带上逐条排除（排除项跨会话会撞车）
+        let opts;
+        if (sources.length === 1 && state.current && state.current.instance === s.instance && state.current.id === s.sessionId) opts = currentOptions();
+        else opts = batchOptions();
         const res = await api('/api/transfer', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sourceInstance: s.instance, sourceAgent: s.agent, sessionId: s.sessionId,
             targets: [{ agent: inst.type, instance: iid, cwd: m.cwd, mode: m.mode }],
-            options: sources.length === 1 ? currentOptions() : batchOptions(),
+            options: opts,
             dryRun, backup: m.backup,
           }),
         });
@@ -792,8 +803,8 @@ function humanizeLog(l) {
     case 'mcp-transfer': case 'mcp-preview_transfer': return { title: (l.type === 'mcp-transfer' ? t('MCP 接力调用') : t('MCP 接力预览')) + (l.dry ? '（dry-run）' : ''), sub: (l.source || '') + ' → ' + (l.target || '') };
     case 'instance-add': return { title: t('添加 agent 实例'), sub: (l.data && l.data.dataDir) || '' };
     case 'api-error': return { title: t('接口错误'), sub: (l.path || '') + ' ' + (l.error || '') };
-    case 'uncaught-exception': return { title: t('未捕获异常（已兜底）'), sub: l.error || '' };
-    case 'unhandled-rejection': return { title: t('Promise 拒绝（已兜底）'), sub: l.error || '' };
+    case 'uncaught-exception': return { title: t('未捕获异常（已兜底）'), sub: l.message || l.error || '' };
+    case 'unhandled-rejection': return { title: t('Promise 拒绝（已兜底）'), sub: l.message || l.error || '' };
     case 'diagbundle': return { title: t('导出诊断包'), sub: l.file || '' };
     case 'search-instance': return { title: t('搜索异常（已跳过该 agent）'), sub: (l.instance || '') + ' ' + (l.error || '') };
     default: return { title: l.type || 'event', sub: JSON.stringify(l).slice(0, 120) };
@@ -871,7 +882,9 @@ async function renderBackups() {
 /* ---------------- 设置 ---------------- */
 async function loadSettings() {
   try { state.config = await api('/api/config'); } catch { state.config = {}; }
-  renderInstancesTable();
+  // 设置页表格用 /api/instances：包含已停用的内置实例，开关反映真实状态
+  try { renderInstancesTable(await api('/api/instances')); }
+  catch { renderInstancesTable(state.instances); }
   renderAbout();
   $('#set-lang').value = window.MS_LANG;
   $('#set-theme').value = localStorage.getItem('ms-theme') || 'dark';
@@ -889,15 +902,15 @@ async function loadSettings() {
   checkUpdateOnce();
 }
 
-function renderInstancesTable() {
-  const rows = state.instances.map((a) => `
-    <tr>
+function renderInstancesTable(list) {
+  const rows = list.map((a) => `
+    <tr class="${a.enabled === false ? 'inst-off' : ''}">
       <td><span class="inst-name"><span class="agent-dot" style="background:${typeColor(a.type)}"></span>${esc(a.name)}${a.builtin ? '' : ' <span class="badge">custom</span>'}</span></td>
       <td class="muted inst-path">${esc(shortPath(a.storage) || '—')}</td>
-      <td class="inst-status ${a.available ? 'ok' : ''}">${a.available ? `✓ ${a.sessionCount}` : '✕'}</td>
+      <td class="inst-status ${a.available ? 'ok' : ''}">${a.enabled === false ? esc(t('已停用')) : (a.available ? `✓ ${a.sessionCount}` : '✕')}</td>
       <td>${a.builtin
-        ? `<label class="switch"><input type="checkbox" data-enable="${esc(a.id)}" checked><span class="slider"></span></label>`
-        : `<button class="btn small ghost" data-remove="${esc(a.id)}">${t('移除')}</button>`}</td>
+        ? `<label class="switch" title="${esc(t('启用/停用该 agent 的内置实例'))}"><input type="checkbox" data-enable="${esc(a.type)}" ${a.enabled ? 'checked' : ''}><span class="slider"></span></label>`
+        : `<button class="btn small ghost" data-remove="${esc(a.instanceId)}">${t('移除')}</button>`}</td>
     </tr>`).join('');
   $('#instances-table').innerHTML = `<table class="instt">
     <tr><th>${t('实例')}</th><th>${t('数据目录')}</th><th>${t('状态')}</th><th>${t('操作')}</th></tr>${rows}</table>`;
@@ -905,8 +918,10 @@ function renderInstancesTable() {
     try {
       await api('/api/instances', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'setEnabled', type: sw.dataset.enable, enabled: sw.checked }) });
       toast(t('已保存'));
+      // 用真实状态重绘开关，并刷新主界面实例列表
+      try { renderInstancesTable(await api('/api/instances')); } catch { }
       loadAgents(true);
-    } catch (e) { toast(e.message, 'err'); }
+    } catch (e) { toast(e.message, 'err'); sw.checked = !sw.checked; }
   }));
   $$('#instances-table [data-remove]').forEach((b) => b.addEventListener('click', async () => {
     try {
@@ -959,13 +974,14 @@ function renderAbout() {
   if (!box) return;
   const c = state.config || {};
   const repo = c.githubRepo || '';
+  const safeHref = (u) => (/^https?:\/\//i.test(String(u)) ? String(u) : '#');
   const links = [];
   if (repo) {
     links.push(`<a class="btn small" href="https://github.com/${esc(repo)}" target="_blank">${icon('star')} GitHub</a>`);
     links.push(`<a class="btn small" href="https://github.com/${esc(repo)}/issues" target="_blank">${icon('info')} ${esc(t('问题反馈'))}</a>`);
   }
-  if (c.sponsorUrl) links.push(`<a class="btn small" href="${esc(c.sponsorUrl)}" target="_blank">${icon('heart')} ${esc(t('赞助'))}</a>`);
-  if (c.buyCoffeeUrl) links.push(`<a class="btn small" href="${esc(c.buyCoffeeUrl)}" target="_blank">${icon('coffee')} Buy Me a Coffee</a>`);
+  if (c.sponsorUrl) links.push(`<a class="btn small" href="${esc(safeHref(c.sponsorUrl))}" target="_blank" rel="noopener noreferrer">${icon('heart')} ${esc(t('赞助'))}</a>`);
+  if (c.buyCoffeeUrl) links.push(`<a class="btn small" href="${esc(safeHref(c.buyCoffeeUrl))}" target="_blank" rel="noopener noreferrer">${icon('coffee')} Buy Me a Coffee</a>`);
   const by = c.authorName ? `<span class="about-ver">by ${esc(c.authorName)}</span>` : '';
   box.innerHTML = `
     <div class="about-appname">AgentRelay <span class="about-ver">v${esc(c.version || '?')}</span> ${by}</div>
@@ -1021,13 +1037,18 @@ function openDirBrowser(cb) {
     api('/api/fs/list?path=' + encodeURIComponent(p || '')).then((d) => {
       state.dirPath = d.path;
       $('#db-path').value = d.path;
+      // 分隔符按后端返回的实际路径推断（Windows \ ，POSIX /）
+      const sep = d.path.includes('\\') ? '\\' : '/';
+      const isWin = /^[A-Za-z]:/.test(d.path);
+      const parts = d.path.split(/[\\/]+/).filter(Boolean);
       $('#db-crumb').innerHTML = d.path
-        ? d.path.split(/[\\/]+/).filter(Boolean).map((seg, i, arr) => `<button data-crumb="${i}">${esc(seg)}</button>`).join('<span>/</span>')
+        ? parts.map((seg, i) => {
+            // Windows 头段是盘符（C: → C:\），POSIX 从根开始逐级拼
+            const target = isWin ? (i === 0 ? seg + '\\' : parts.slice(0, i + 1).join('\\')) : '/' + parts.slice(0, i + 1).join('/');
+            return `<button data-nav="${esc(target)}">${esc(seg)}</button>`;
+          }).join('<span>/</span>')
         : `<span>${t('此电脑')}</span>`;
-      $$('#db-crumb [data-crumb]').forEach((b) => b.addEventListener('click', () => {
-        const parts = d.path.split(/[\\/]+/).filter(Boolean);
-        nav(parts.slice(0, Number(b.dataset.crumb) + 1).join('\\'));
-      }));
+      $$('#db-crumb [data-nav]').forEach((b) => b.addEventListener('click', () => nav(b.dataset.nav)));
       $('#db-list').innerHTML = d.dirs.map((x) => `<div class="dir-item" data-p="${esc(x.path)}">${esc(x.name)}</div>`).join('')
         || `<div class="muted" style="padding:12px">—</div>`;
       $$('#db-list .dir-item').forEach((el) => el.addEventListener('click', () => nav(el.dataset.p)));

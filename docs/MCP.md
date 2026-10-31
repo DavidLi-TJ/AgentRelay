@@ -53,6 +53,6 @@ args = ["C:\\path\\to\\AgentRelay\\server\\mcp.js"]
 ## 手动测试
 
 ```bash
-echo {"jsonrpc":"2.0","id":1,"method":"tools/list"} | node server/mcp.js
+ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node server/mcp.js
 node cli.js mcp   # 同效
 ```

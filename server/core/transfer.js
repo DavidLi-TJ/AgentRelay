@@ -73,6 +73,7 @@ function writeMsxFile(msx, file) {
     let first = true;
     for (const k of Object.keys(msx)) {
       if (k === 'entries' || k === 'compactions' || k === 'loss') continue;
+      if (msx[k] === undefined) continue; // undefined 会被 JSON.stringify 变成 undefined 字面量，产出非法 JSON
       if (!first) ws.write(',');
       first = false;
       ws.write(JSON.stringify(k) + ':' + JSON.stringify(msx[k]));
@@ -295,10 +296,10 @@ function t2Command(targetAgent, fileName) {
 }
 
 // 批量：把一个源会话接力给多个目标
-async function transfer({ sourceAgent, sessionId, targets, options = {}, dryRun = false, sourceInstance = null }) {
+async function transfer({ sourceAgent, sessionId, targets, options = {}, dryRun = false, sourceInstance = null, backup = null }) {
   const results = [];
   for (const t of targets || []) {
-    results.push(await transferOne({ sourceAgent, sessionId, sourceInstance: sourceInstance || null, targetAgent: t.agent, cwd: t.cwd, mode: t.mode || 'T1', options, dryRun, dbFileOverride: t.dbFileOverride || null, sourceInstance: t.sourceInstance || null, targetInstance: t.instance || null }));
+    results.push(await transferOne({ sourceAgent, sessionId, sourceInstance: t.sourceInstance || sourceInstance || null, targetAgent: t.agent, cwd: t.cwd, mode: t.mode || 'T1', options, dryRun, dbFileOverride: t.dbFileOverride || null, targetInstance: t.instance || null, backup }));
   }
   return results;
 }

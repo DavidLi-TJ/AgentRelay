@@ -56,7 +56,7 @@ function listSessions(baseDir) {
         (SELECT count(*) FROM message m WHERE m.session_id = s.id) AS msg_count
       FROM session s ORDER BY s.time_updated DESC`).all();
     return rows.map((r) => ({
-      id: r.id, agent: 'zcode', file: dbPath(),
+      id: r.id, agent: 'zcode', file: dbPath(baseDir),
       title: r.title || '(无标题)', cwd: r.directory || '', version: r.version,
       tsFirst: r.time_created ? msToISO(r.time_created) : null,
       tsLast: r.time_updated ? msToISO(r.time_updated) : null,
@@ -235,7 +235,7 @@ function writeSession(msx, { cwd, newId, dbFile, baseDir } = {}) {
         const data = {
           role: 'user', time: { created: ms }, agent: 'zcode-agent',
           model: userModel.modelSelection || userModel.model || userModel,
-          contextSnapshot: { envInfo: { cwd, platform: 'win32', shell: 'Git Bash' } },
+          contextSnapshot: { envInfo: { cwd, platform: process.platform, shell: process.platform === 'win32' ? 'Git Bash' : (process.env.SHELL || 'sh').split('/').pop() } },
           semantics: { origin: 'user' },
         };
         insertMsg(db, msgCols, { id: mid, session_id: id, time_created: ms, time_updated: ms, data: JSON.stringify(data), sequence: seq });

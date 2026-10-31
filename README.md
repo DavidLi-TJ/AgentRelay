@@ -22,6 +22,8 @@ AgentRelay moves the session itself. Every message, tool call, tool result, and 
 
 Nothing is summarized, nothing is uploaded, and there is nothing to install — the app is a handful of JavaScript files run by the Node.js you already have.
 
+One more thing worth saying plainly: everything above happens in a browser page. The other tools in this space — ccusage, claude-code-history-viewer, the various handoff scripts — are terminal commands you run, with flags to memorize and JSON to squint at. AgentRelay gives the same job a real interface: agents as cards, sessions as a list you can search, the conversation laid out with checkboxes. If you can use a web app, you can relay a session. The CLI and MCP interfaces exist, but they are optional doors, not the front door.
+
 ## What it does
 
 - **One page for every session.** Nine agents (Claude Code, Codex CLI, ZCode, WorkBuddy, OpenCode, DeepSeek Harness, Gemini CLI, Pi, OpenClaw), browsable, filterable, and full-text searchable, with verbatim preview on the right.
@@ -102,7 +104,7 @@ Six tools: `list_agents`, `list_sessions`, `get_session`, `preview_transfer`, `t
 
 ## Safety
 
-Every real write is preceded by a backup: a consistent SQLite snapshot via `VACUUM INTO` (file stores are copied as-is), the last 20 kept under the backup root shown on the Diagnostics page, one click to restore. Database writes run in transactions and roll back on failure; file writes land through temp-file-plus-rename and never touch the source session. The MCP channel stays dry-run without an explicit `confirm: true`. The local server checks the Host header, accepts only JSON POSTs, and caps request bodies at 64 MB. There is no telemetry and no network call of any kind unless you turn on the update check.
+Any write that could overwrite existing data is preceded by a backup: a consistent SQLite snapshot via `VACUUM INTO` (file stores are copied as-is), the last 20 kept under the backup root shown on the Diagnostics page, one click to restore. T0 and T1 into a database target and every OpenCode/WorkBuddy/Codex/ZCode write get this snapshot; relays that only create brand-new files (T2 transcripts, first-time writes into an empty Claude project folder) don't need one. Database writes run in transactions and roll back on failure; file writes land through temp-file-plus-rename and never touch the source session. The MCP channel stays dry-run without an explicit `confirm: true`. The local server checks the Host header, accepts only JSON POSTs, and caps request bodies at 64 MB. There is no telemetry and no network call of any kind unless you turn on the update check.
 
 ## Where your data lives
 
@@ -155,3 +157,5 @@ node scripts/sandbox-test.js
 ## License
 
 [MIT](LICENSE)
+
+Issues and pull requests are welcome — bug reports with a diagnostic bundle (Diagnostics page → Export) are the fastest way to get something fixed.

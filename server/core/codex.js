@@ -336,7 +336,7 @@ function registerThread({ id, rolloutPath, title, cwd, createdMs, modelProvider,
     set('updated_at_ms', Date.now());
     set('recency_at_ms', Date.now());
     set('source', 'cli');
-    set('cwd', '\\\\?\\' + cwd);
+    set('cwd', (process.platform === 'win32' ? '\\\\?\\' : '') + cwd);
     set('title', title || '');
     set('first_user_message', firstUserMessage || '');
     set('preview', (preview || firstUserMessage || '').slice(0, 200));
@@ -358,12 +358,12 @@ function registerThread({ id, rolloutPath, title, cwd, createdMs, modelProvider,
           const pcols = db.prepare("PRAGMA table_info(projects)").all().map((c) => c.name);
           const tplProj = db.prepare('SELECT * FROM projects WHERE id = ?').get(tplRow.project_id);
           const cwdCol = pcols.find((c) => ['cwd', 'path', 'directory', 'root'].includes(c));
-          const exist = cwdCol ? db.prepare(`SELECT id FROM projects WHERE ${cwdCol} = ?`).get('\\\\?\\' + cwd) || db.prepare(`SELECT id FROM projects WHERE ${cwdCol} = ?`).get(cwd) : null;
+          const exist = cwdCol ? db.prepare(`SELECT id FROM projects WHERE ${cwdCol} = ?`).get((process.platform === 'win32' ? '\\\\?\\' : '') + cwd) || db.prepare(`SELECT id FROM projects WHERE ${cwdCol} = ?`).get(cwd) : null;
           if (exist) projId = exist.id;
           else if (tplProj) {
             const newRow = { ...tplProj };
             newRow.id = uuidV7Like();
-            if (cwdCol) newRow[cwdCol] = '\\\\?\\' + cwd;
+            if (cwdCol) newRow[cwdCol] = (process.platform === 'win32' ? '\\\\?\\' : '') + cwd;
             const names = Object.keys(newRow).filter((k) => pcols.includes(k));
             db.prepare(`INSERT INTO projects (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`)
               .run(...names.map((n) => newRow[n]));
@@ -374,8 +374,16 @@ function registerThread({ id, rolloutPath, title, cwd, createdMs, modelProvider,
       row.project_id = projId;
     }
     const names = Object.keys(row);
-    db.prepare(`INSERT INTO threads (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`)
-      .run(...names.map((n) => row[n]));
+    // projects + threads 两个 INSERT 包事务：中途失败不留孤儿 project 行
+    db.exec('BEGIN');
+    try {
+      db.prepare(`INSERT INTO threads (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`)
+        .run(...names.map((n) => row[n]));
+      db.exec('COMMIT');
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch { }
+      throw e;
+    }
   } finally {
     db.close();
   }

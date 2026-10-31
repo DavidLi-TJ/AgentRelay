@@ -201,7 +201,8 @@ function selectEntries(entries, opts = {}, loss = []) {
         continue;
       }
       // 2) 截大工具输出（已截断的跳过；截断后必须 < 400 阈值，防止同一块被反复"截断"造成活锁）
-      let done = false;
+      //    一轮内批量截断所有超限块，避免每次只截一个再从头重扫的 O(n²)
+      let truncatedAny = false;
       for (const e of list) {
         for (const b of e.blocks) {
           if (b.type === 'tool_result' && !b.truncated) {
@@ -210,13 +211,12 @@ function selectEntries(entries, opts = {}, loss = []) {
               b.output = out.slice(0, 380) + '…[预算截断]'; b.truncated = true;
               const v = estimateEntryTokens(e);
               total -= est.get(e) - v; est.set(e, v);
-              budgetLoss.trunc++; done = true; break;
+              budgetLoss.trunc++; truncatedAny = true;
             }
           }
         }
-        if (done) break;
       }
-      if (done) continue;
+      if (truncatedAny) continue;
       // 3) 按累计量批量丢弃最旧的非用户条目（避免逐条 O(n²)）
       const excess = total - budgetTokens;
       const dropIdxs = [];
@@ -292,17 +292,30 @@ function redactDeep(obj, counter) {
 function redactMsx(msx) {
   const counter = { n: 0 };
   const entries = redactDeep(msx.entries, counter);
+  // title 取自首条用户消息、env.instructions 可能含配置片段——一并脱敏
+  const extra = { title: msx.source && msx.source.title, env: msx.env };
+  const cleaned = redactDeep(extra, counter);
+  const title = cleaned && cleaned.title;
+  const env = cleaned && cleaned.env;
   if (counter.n > 0) msx.loss = [...(msx.loss || []), `已脱敏 ${counter.n} 处疑似秘钥/凭据`];
-  return { ...msx, entries };
+  return { ...msx, entries, source: { ...(msx.source || {}), title }, env };
 }
 
 // 最近一次 compact 边界起点的条目下标（无 compact 记录时 -1）。
 // 用 >= 边界时间戳：压缩标记/压缩摘要本身也留在活上下文里，属于要接走的"记忆"。
+// 时间戳统一 Date.parse 数值比较（不同适配器时区/精度格式不同，字符串比较会错位）。
 function lastCompactionIndex(entries, compactions) {
   if (!Array.isArray(compactions) || !compactions.length) return -1;
   const ts = compactions[compactions.length - 1].ts;
   if (!ts || !Array.isArray(entries)) return -1;
-  return entries.findIndex((e) => e.ts && String(e.ts) >= String(ts));
+  const boundary = Date.parse(ts);
+  const useNumeric = Number.isFinite(boundary);
+  return entries.findIndex((e) => {
+    if (!e.ts) return false;
+    if (!useNumeric) return String(e.ts) >= String(ts);
+    const t = Date.parse(e.ts);
+    return Number.isFinite(t) ? t >= boundary : String(e.ts) >= String(ts);
+  });
 }
 
 module.exports = {

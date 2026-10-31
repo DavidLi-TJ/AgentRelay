@@ -27,7 +27,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         instance: { type: 'string', description: '实例 id（来自 list_agents）；不填则按 agent 类型取第一个实例' },
-        agent: { type: 'string', description: 'agent 类型：claude | codex | zcode | workbuddy' },
+        agent: { type: 'string', description: 'agent 类型：claude | codex | zcode | workbuddy | opencode | dsh | gemini | pi | openclaw' },
         q: { type: 'string', description: '按标题/项目路径过滤' },
         limit: { type: 'number', description: '最多返回条数，默认 20' },
       },
@@ -99,7 +99,7 @@ async function callTool(name, args = {}) {
         sessionCount: a.sessionCount, storage: a.storage,
       })));
     case 'list_sessions': {
-      const iid = args.instance || (args.agent ? null : null);
+      const iid = args.instance || null;
       let list;
       if (iid) {
         const inst = agents.getInstance(iid);

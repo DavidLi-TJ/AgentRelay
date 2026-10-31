@@ -16,6 +16,13 @@ fs.mkdirSync(SANDBOX, { recursive: true });
 const projA = path.join(SANDBOX, 'projA');
 fs.mkdirSync(projA, { recursive: true });
 
+// 清理沙盒期间在真实 ~/.claude/projects 产生的测试会话目录
+// slug 随仓库实际路径动态计算（规则与 claude.js 一致：非字母数字替换为 -）
+function cleanupClaudeSandbox() {
+  const claudeRoot = path.join(os.homedir(), '.claude', 'projects', projA.replace(/[^a-zA-Z0-9]/g, '-'));
+  try { fs.rmSync(claudeRoot, { recursive: true, force: true }); console.log('(已清理 claude 沙盒目录)'); } catch { }
+}
+
 function pick(list, pred, label) {
   const s = list.find(pred);
   if (!s) throw new Error(`找不到测试样本: ${label}`);
@@ -111,10 +118,10 @@ function pick(list, pred, label) {
   console.log(`  脱敏: redactions done`);
 
   console.log(`\n结果: 全部断言通过（无 FATAL）`);
-  // 清理沙盒期间在真实 ~/.claude/projects 产生的测试会话目录
-  // slug 随仓库实际路径动态计算（规则与 claude.js 一致：非字母数字替换为 -）
-  const claudeSlug = projA.replace(/[^a-zA-Z0-9]/g, '-');
-  const claudeRoot = path.join(require('os').homedir(), '.claude', 'projects', claudeSlug);
-  try { fs.rmSync(claudeRoot, { recursive: true, force: true }); console.log('(已清理 claude 沙盒目录)'); } catch { }
+  cleanupClaudeSandbox();
   if (out.fail.length) { console.log(out.fail.join('\n')); process.exit(1); }
-})().catch((e) => { console.error('FATAL', e); process.exit(1); });
+})().catch((e) => {
+  cleanupClaudeSandbox();
+  console.error('FATAL', e);
+  process.exit(1);
+});

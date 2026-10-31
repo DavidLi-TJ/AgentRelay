@@ -175,7 +175,7 @@ function writeSession(msx, { cwd, newId, dbFile, projectsDir, baseDir } = {}) {
   lines.push({ id: randomUUID(), timestamp: now, type: 'ai-title', aiTitle: (msx.source && msx.source.title) || truncateStr(firstUserText, 60), sessionId: id, cwd });
   writeJsonl(file, lines);
 
-  // 注册 sessions 表
+  // 注册 sessions 表；DB 失败时补偿删除已落盘的 jsonl，避免孤儿文件
   const targetDb = dbFile || dbPath(baseDir);
   const db = new DatabaseSync(targetDb);
   try {
@@ -210,6 +210,9 @@ function writeSession(msx, { cwd, newId, dbFile, projectsDir, baseDir } = {}) {
       const unames = Object.keys(urow).filter((k) => urow[k] != null);
       db.prepare(`INSERT INTO session_usage (${unames.map((n) => '"' + n + '"').join(',')}) VALUES (${unames.map(() => '?').join(',')})`).run(...unames.map((n) => urow[n]));
     } catch { /* 非致命 */ }
+  } catch (e) {
+    try { fs.rmSync(file, { force: true }); } catch { }
+    throw e;
   } finally { db.close(); }
   return { id, path: file, loss, count: lines.length };
 }

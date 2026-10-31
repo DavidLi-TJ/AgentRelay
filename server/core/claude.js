@@ -144,7 +144,7 @@ function readSession(sessionIdOrFile, baseDir) {
   let file = sessionIdOrFile;
   if (!fs.existsSync(file)) {
     outer: for (const d of fs.readdirSync(projectsRoot(baseDir))) {
-      const dir = path.join(projectsRoot(), d);
+      const dir = path.join(projectsRoot(baseDir), d);
       if (!fs.statSync(dir).isDirectory()) continue;
       const cand = path.join(dir, sessionIdOrFile + '.jsonl');
       if (fs.existsSync(cand)) { file = cand; break outer; }
@@ -260,11 +260,19 @@ function writeSession(msx, { cwd, newId, baseDir } = {}) {
   ensureDir(dir);
   const file = path.join(dir, id + '.jsonl');
   const loss = [...(msx.loss || [])];
+  // 跨厂商思考块签名不可重放（需要源厂商私钥），带空签名写入可能让 resume 报 400——直接剥离
+  let entries = msx.entries || [];
+  if ((msx.source?.agent || '') !== 'claude-code' && entries.some((e) => (e.blocks || []).some((b) => b.type === 'thinking'))) {
+    entries = entries
+      .map((e) => ({ ...e, blocks: (e.blocks || []).filter((b) => b.type !== 'thinking') }))
+      .filter((e) => (e.blocks || []).length > 0);
+    loss.push('Claude 目标：跨厂商思考块签名无法重放，已剥离全部 thinking 块');
+  }
   const lines = [];
   let prevUuid = null;
   let firstUserText = '';
   let count = 0;
-  for (const e of msx.entries || []) {
+  for (const e of entries) {
     const ts = e.ts || nowISO();
     if (e.kind === 'compaction') { loss.push('Claude 目标：跳过 1 条 compaction 标记'); continue; }
     if (e.role === 'meta' || e.role === 'system') {
@@ -337,7 +345,7 @@ function findFile(sessionIdOrFile, baseDir) {
   let file = sessionIdOrFile;
   if (!fs.existsSync(file)) {
     for (const d of fs.readdirSync(projectsRoot(baseDir))) {
-      const dir = path.join(projectsRoot(), d);
+      const dir = path.join(projectsRoot(baseDir), d);
       if (!fs.statSync(dir).isDirectory()) continue;
       const cand = path.join(dir, sessionIdOrFile + '.jsonl');
       if (fs.existsSync(cand)) return cand;
