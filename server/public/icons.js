@@ -27,6 +27,7 @@
     alert: I('<path d="M12 3.5L2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17.2v.4"/>'),
     arrow: I('<path d="M6 18L18 6"/><path d="M9 6h9v9"/>'),
     refresh: I('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4h-4"/>'),
+    power: I('<path d="M12 3v8"/><path d="M6.3 6.5a8 8 0 1 0 11.4 0"/>'),
     empty: I('<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/><path d="M13 7.5h3.5M7.5 13v3.5" stroke-dasharray="2.5 2.5"/>'),
   };
   window.icon = function icon(name, cls = '') {

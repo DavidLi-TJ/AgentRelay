@@ -123,6 +123,16 @@ function activateView(name) {
 }
 $$('.tab').forEach((b) => b.addEventListener('click', () => activateView(b.dataset.view)));
 $('#btn-refresh').addEventListener('click', () => { state.searchActive = false; loadAgents(true); toast(t('已刷新')); });
+$('#btn-shutdown').addEventListener('click', async () => {
+  if (!window.confirm(t('关闭 AgentRelay 服务？本地服务将退出，浏览器里可以随时重新启动。'))) return;
+  try {
+    await api('/api/shutdown', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  } catch { /* 服务已退出，fetch 失败属预期 */ }
+  $('#server-status').style.background = 'var(--err)';
+  toast(t('服务已关闭。本页不再有数据，可关闭此标签页。'), 'warn');
+  $$('#btn-refresh, #btn-shutdown').forEach((b) => (b.disabled = true));
+  $('#server-status').title = 'stopped';
+});
 $('#search').addEventListener('input', () => {
   if (state.searchActive) { state.searchActive = false; renderSessions(); }
   clearTimeout(state.searchTimer);

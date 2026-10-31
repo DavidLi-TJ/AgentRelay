@@ -306,6 +306,13 @@ async function route(req, res, u) {
       logger.info('log-clear', {});
       return send(res, 200, { ok: true });
     }
+    if (p === '/api/shutdown') {
+      // 界面上的「关闭服务」：先应答再退出，让前端能提示用户
+      logger.info('server-stop', { via: 'gui' });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true }), () => setTimeout(() => process.exit(0), 150));
+      return;
+    }
     if (p === '/api/backups') {
       const body = await readBody(req, res);
       const { backupDir, backupFiles } = require('./core/util');
