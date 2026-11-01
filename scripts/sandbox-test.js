@@ -108,6 +108,30 @@ function pick(list, pred, label) {
   fs.rmSync(path.dirname(r6.path), { recursive: true, force: true });
   console.log(`  workbuddy→codex: 合成成功`);
 
+  // vscode（VS Code Copilot 只读适配器）：合成 transcript → doctor/list/read
+  const vsc = require('../server/core/vscode');
+  const vscRoot = path.join(SANDBOX, 'vscode-storage');
+  const vscHash = path.join(vscRoot, 'demohash');
+  fs.mkdirSync(path.join(vscHash, 'GitHub.copilot-chat', 'transcripts'), { recursive: true });
+  fs.writeFileSync(path.join(vscHash, 'workspace.json'), JSON.stringify({ folder: 'file:///c%3A/demo/shop-frontend' }));
+  const ev = [];
+  let vts = Date.now() - 60000;
+  const vline = (type, data) => ev.push(JSON.stringify({ id: 'v' + ev.length, timestamp: new Date((vts += 3000)).toISOString(), parentId: null, type, data }));
+  vline('session.start', { sessionId: 'demo-vscode-1', copilotVersion: '0.44.0', vscodeVersion: '1.116.0', startTime: new Date(vts).toISOString() });
+  vline('user.message', { content: '帮我看看这个函数为什么超时', attachments: [] });
+  vline('assistant.message', { content: '先读一下实现。' });
+  vline('tool.execution_start', { toolCallId: 'call_demo_v1', toolName: 'read_file', arguments: { filePath: 'c:\\demo\\x.ts' } });
+  vline('tool.execution_complete', { toolCallId: 'call_demo_v1', success: true });
+  vline('assistant.message', { content: '找到问题了：循环里每次都重新建连接。' });
+  fs.writeFileSync(path.join(vscHash, 'GitHub.copilot-chat', 'transcripts', 'demo-vscode-1.jsonl'), ev.join('\n') + '\n');
+  const vDoc = vsc.doctor(vscRoot);
+  const vList = vsc.listSessions(vscRoot);
+  if (!vDoc.ok || vList.length !== 1) throw new Error('vscode doctor/list 异常');
+  const vMsx = await vsc.readSession('demo-vscode-1', vscRoot);
+  if (vMsx.project.cwd !== 'c:/demo/shop-frontend' || vMsx.stats.entries < 5) throw new Error('vscode readSession 异常');
+  if (!vMsx.entries.some((e) => (e.blocks || []).some((b) => b.type === 'tool_use'))) throw new Error('vscode tool_use 缺失');
+  console.log(`  vscode: ${vList.length} 会话, read=${vMsx.stats.entries}条 cwd=${vMsx.project.cwd}`);
+
   // 选择器
   const { selectEntries, redactMsx, computeStats } = require('../server/core/msx');
   const loss = [];

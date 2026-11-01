@@ -2,7 +2,7 @@
 /* AgentRelay GUI v3 —— 实例化 agent · 惰性加载 · 接力向导 · 活动时间线 · 主题/双语 */
 
 const AGENT_COLORS = { claude: '#d97757', codex: '#10a37f', zcode: '#4f7cff', workbuddy: '#3c8cff', opencode: '#e8a33d', gemini: '#4796e3', pi: '#c9a227', openclaw: '#e05e3d', dsh: '#2aa8c9' };
-const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex CLI', zcode: 'ZCode', workbuddy: 'WorkBuddy', opencode: 'OpenCode', gemini: 'Gemini CLI', pi: 'Pi', openclaw: 'OpenClaw', dsh: 'DeepSeek Harness' };
+const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex CLI', zcode: 'ZCode', workbuddy: 'WorkBuddy', opencode: 'OpenCode', gemini: 'Gemini CLI', pi: 'Pi', openclaw: 'OpenClaw', dsh: 'DeepSeek Harness', vscode: 'VS Code Copilot' };
 
 const state = {
   instances: [],

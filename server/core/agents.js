@@ -15,6 +15,7 @@ const gemini = require('./gemini');
 const pi = require('./pi');
 const openclaw = require('./openclaw');
 const dsh = require('./dsh');
+const vscode = require('./vscode');
 const { lastCompactionIndex } = require('./msx');
 
 const META = {
@@ -27,8 +28,9 @@ const META = {
   pi: { id: 'pi', name: 'Pi', vendor: 'earendil-works (open source)', color: '#c9a227', cli: 'pi', experimental: true },
   openclaw: { id: 'openclaw', name: 'OpenClaw', vendor: 'open source', color: '#e05e3d', cli: null, experimental: true },
   dsh: { id: 'dsh', name: 'DeepSeek Harness', vendor: 'deepseek-ai (open source)', color: '#2aa8c9', cli: 'dsh', experimental: true },
+  vscode: { id: 'vscode', name: 'VS Code Copilot', vendor: 'GitHub (open source)', color: '#8957e5', cli: null, experimental: true },
 };
-const ADAPTERS = { claude, codex, zcode, workbuddy, opencode, gemini, pi, openclaw, dsh };
+const ADAPTERS = { claude, codex, zcode, workbuddy, opencode, gemini, pi, openclaw, dsh, vscode };
 
 // ---- 实例 ----
 function loadInstances() {
@@ -195,6 +197,7 @@ function addCustomInstance({ type, name, dataDir }) {
     const expect = {
       claude: 'projects 目录', codex: 'sessions 目录 / state_5.sqlite', zcode: 'cli/db/db.sqlite',
       workbuddy: 'workbuddy.db', opencode: 'opencode.db', dsh: 'sessions 目录（zstd jsonl）',
+      vscode: 'workspaceStorage/*/GitHub.copilot-chat/transcripts',
       gemini: 'tmp/*/chats 目录', pi: 'sessions 目录（jsonl）', openclaw: 'sessions 目录（jsonl）',
     }[type] || '存储目录';
     throw new Error(`在 ${abs} 下未找到 ${type} 的存储（应有 ${expect}）`);

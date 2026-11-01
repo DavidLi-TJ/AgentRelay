@@ -26,7 +26,7 @@ One more thing worth saying plainly: everything above happens in a browser page.
 
 ## What it does
 
-- **One page for every session.** Nine agents (Claude Code, Codex CLI, ZCode, WorkBuddy, OpenCode, DeepSeek Harness, Gemini CLI, Pi, OpenClaw), browsable, filterable, and full-text searchable, with verbatim preview on the right.
+- **One page for every session.** Ten agents (Claude Code, Codex CLI, ZCode, WorkBuddy, OpenCode, DeepSeek Harness, Gemini CLI, Pi, OpenClaw, VS Code Copilot), browsable, filterable, and full-text searchable, with verbatim preview on the right.
 - **Carry only what you want.** Check entries one by one, or set the stage with toggles for thinking blocks, tool results, and system injections, a from-entry offset, a token cap, and regex-based secret redaction.
 - **Write into the target, not at it.** Relay synthesizes the target agent's own session format and registers it, so `claude --resume` / `codex resume` / the desktop session list just works.
 - **Back up first, always.** A consistent SQLite snapshot (`VACUUM INTO`) is taken before any write. Twenty are kept, and the Diagnostics page restores any of them.
@@ -83,6 +83,7 @@ Cross-agent relays cannot replay thinking-block signatures (that requires the ve
 | DeepSeek Harness | `~/.dsh/sessions/` (multi-frame zstd) | ✓ | T2 | Kickoff prompt |
 | Gemini CLI (experimental) | `~/.gemini/tmp/*/chats/` | ✓ | T2 | Kickoff prompt |
 | Pi / OpenClaw (experimental) | JSONL | ✓ | T2 | Kickoff prompt |
+| VS Code Copilot (experimental) | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T2 | Kickoff prompt |
 
 Experimental adapters are implemented from the official source schemas and pass synthetic-sample tests; Trae is on hold because its session database is SQLCipher-encrypted. Several instances of the same agent (say, two Claude config directories) can be added in Settings.
 

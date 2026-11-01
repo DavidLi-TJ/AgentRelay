@@ -26,7 +26,7 @@ AgentRelay 搬的是会话本身：每条消息、每次工具调用和结果、
 
 ## 功能一览
 
-- **一个页面看全所有会话**：九家 agent（Claude Code、Codex CLI、ZCode、WorkBuddy、OpenCode、DeepSeek Harness、Gemini CLI、Pi、OpenClaw）的会话统一浏览、筛选、全文搜索，右侧逐字预览。
+- **一个页面看全所有会话**：十家 agent（Claude Code、Codex CLI、ZCode、WorkBuddy、OpenCode、DeepSeek Harness、Gemini CLI、Pi、OpenClaw、VS Code Copilot）的会话统一浏览、筛选、全文搜索，右侧逐字预览。
 - **带走多少自己定**：逐条勾选；也可以用开关批量定——思考块、工具结果、系统注入、起始条数、token 上限、秘钥正则脱敏。
 - **写进目标的原生存储**：合成为目标 agent 自己的会话格式并注册，`claude --resume`、`codex resume`、桌面端会话列表直接认。
 - **先备份再写入**：每次写入前做 SQLite 一致性快照（`VACUUM INTO`），保留 20 份，诊断页一键还原。
@@ -83,6 +83,7 @@ Windows 10/11，Node.js 22.5 以上（为了内置的 `node:sqlite`）。零 npm
 | DeepSeek Harness | `~/.dsh/sessions/`（zstd 多帧） | ✓ | T2 | 启动指令续接 |
 | Gemini CLI（实验性） | `~/.gemini/tmp/*/chats/` | ✓ | T2 | 启动指令续接 |
 | Pi / OpenClaw（实验性） | 各自 JSONL | ✓ | T2 | 启动指令续接 |
+| VS Code Copilot（实验性） | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T2 | 启动指令续接 |
 
 实验性适配器基于官方源码 schema 实现并通过合成样本测试；Trae 因会话库 SQLCipher 加密暂缓。同一个 agent 可以在设置页添加多个实例（比如两个 Claude 配置目录）。
 

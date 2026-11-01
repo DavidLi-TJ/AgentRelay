@@ -94,3 +94,20 @@
 - ~/.claude/sessions/ses_*.jsonl 是另一种文件（非 projects 会话，忽略）
 - Codex `~/.claude/history.jsonl`、`~/.codex/history.jsonl` 存在（prompt 历史，v1 不用）
 - ZCode db 里 `model_usage`/`turn_usage` 有真实 token 统计可用于展示
+
+## 7. VS Code Copilot（内置 Chat/Agent，只读源）
+
+- 位置：`%APPDATA%/Code/User/workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/<uuid>.jsonl`（macOS ~/Library/Application Support/Code、Linux ~/.config/Code）
+- workspace 真实路径：同级 `workspace.json` 的 `folder`/`workspace` 字段，file:/// URI（如 file:///c%3A/demo/app → c:/demo/app）
+- 行结构：`{id, timestamp(ISO), parentId, type, data}`
+  - `session.start`：data.{sessionId, producer:'copilot-agent', copilotVersion, vscodeVersion, startTime}
+  - `user.message`：data.{content(字符串), attachments[]}——正文即 content
+  - `assistant.message`：data.{messageId, content(markdown)}
+  - `tool.execution_start`：data.{toolCallId, toolName, arguments}
+  - `tool.execution_complete`：data.{toolCallId, success}——**没有工具输出**，只存成功/失败标志
+  - `assistant.turn_start/turn_end`：轮次标记，无内容
+- 注意：
+  - 老格式 `session_start`（下划线）出现在 debug-logs/ 下，是遥测 span（{v,ts,dur,sid,attrs}），不是会话内容
+  - 会话 id = session.start.data.sessionId（与文件名 uuid 一致）
+  - Workspace 移动/改名会换 hash 目录，旧历史仍在旧 hash 下（VS Code 已知行为）
+- 适配器：server/core/vscode.js（只读源；T2 可作为目标）

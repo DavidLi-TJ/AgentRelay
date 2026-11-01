@@ -320,5 +320,5 @@ function lastCompactionIndex(entries, compactions) {
 
 module.exports = {
   estimateEntryTokens, computeStats, entryPreview, firstUserText, titleFromEntries,
-  selectEntries, redactMsx, blockText, lastCompactionIndex,
+  selectEntries, redactMsx, blockText, lastCompactionIndex, enforceToolPairing,
 };
