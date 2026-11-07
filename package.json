@@ -1,5 +1,5 @@
 {
-  "name": "agentrelay",
+  "name": "@ldavidl/agentrelay",
   "version": "0.2.0",
   "description": "AgentRelay —— 跨 AI Agent 会话接力：逐字保真、选择性加载、多 agent 互通",
   "main": "server/index.js",
@@ -36,5 +36,8 @@
   "engines": {
     "node": ">=22.5"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

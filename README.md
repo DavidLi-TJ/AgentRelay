@@ -15,7 +15,7 @@ English ｜ [简体中文](README.zh-CN.md) · [User guide](docs/USER-GUIDE.md) 
 </div>
 
 ```bash
-npx github:DavidLi-TJ/AgentRelay serve   # zero install, zero dependencies
+npx @ldavidl/agentrelay serve   # zero install, zero dependencies
 ```
 
 ## The problem
@@ -45,8 +45,8 @@ One more thing worth saying plainly: everything above happens in a browser page.
 Windows 10/11 (fully verified), Node.js 22.5 or newer (for the built-in `node:sqlite` module). No `npm install` — there are no dependencies to install. Linux/macOS: adapters read the same `~/.` paths and the storage paths are in place, but not yet broadly field-tested — real-world feedback is welcome (open an issue if something misbehaves).
 
 ```bash
-npx github:DavidLi-TJ/AgentRelay serve  # one command, then open http://127.0.0.1:17777
-# or: double-click StartAgentRelay.bat after cloning (Windows)
+npx @ldavidl/agentrelay serve  # one command, then open http://127.0.0.1:17777
+# or: npx github:DavidLi-TJ/AgentRelay serve · double-click StartAgentRelay.bat after cloning (Windows)
 # or: ./start.sh after cloning (Linux/macOS)
 ```
 

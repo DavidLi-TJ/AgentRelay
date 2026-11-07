@@ -13,7 +13,7 @@ English: [USER-GUIDE.md](USER-GUIDE.md)
 三种启动方式：
 
 ```bash
-npx github:DavidLi-TJ/AgentRelay serve        # 一条命令，无需克隆仓库
+npx @ldavidl/agentrelay serve        # 一条命令，无需克隆仓库
 # 或者克隆后：
 node server/index.js                          # 或双击 StartAgentRelay.bat（Windows）/ 运行 ./start.sh（Linux/macOS）
 ```

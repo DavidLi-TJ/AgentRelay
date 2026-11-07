@@ -13,7 +13,7 @@ You need **Windows 10/11** (fully verified; macOS/Linux storage paths are in pla
 Three ways to start:
 
 ```bash
-npx github:DavidLi-TJ/AgentRelay serve        # one-off, no clone needed
+npx @ldavidl/agentrelay serve        # one-off, no clone needed
 # or, after cloning:
 node server/index.js                          # or double-click StartAgentRelay.bat (Windows) / run ./start.sh (Linux/macOS)
 ```
