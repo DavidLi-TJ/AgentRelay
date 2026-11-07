@@ -320,25 +320,6 @@ function allInstances({ sessions = false } = {}) {
   return loadInstances().map((inst) => instanceSummary(inst, { sessions }));
 }
 
-// 所有已知项目目录（接力目标 cwd 候选）
-function listTargets() {
-  const set = new Map();
-  const add = (cwd) => {
-    if (!cwd || typeof cwd !== 'string') return;
-    if (cwd.startsWith('\\\\?\\')) cwd = cwd.slice(4);
-    if (!fs.existsSync(cwd)) return;
-    if (/WorkBuddy AI[\/]20\d\d-/.test(cwd)) return; // WorkBuddy 自动时间戳工作区不算项目
-    if (path.parse(cwd).root === cwd) return; // 盘根
-    if (!set.has(cwd)) set.set(cwd, { cwd, label: path.basename(cwd) || cwd, agents: [] });
-  };
-  for (const inst of loadInstances()) {
-    try {
-      for (const s of instanceSummary(inst, { sessions: true }).sessions) add(s.cwd);
-    } catch { }
-  }
-  return [...set.values()].sort((a, b) => a.cwd.localeCompare(b.cwd));
-}
-
 function detectWorkbuddy() {
   const candidates = [
     path.join(HOME, '.workbuddy'),
@@ -375,5 +356,5 @@ module.exports = {
   META, ADAPTERS, loadInstances, getInstance, instanceSummary, listInstances, allInstances, instancesForSettings,
   listInstanceSessions, bustListCache, readMsxInstance, readMsx, writeTarget,
   setTypeEnabled, addCustomInstance, removeCustomInstance,
-  agentSummary, listAgents, listTargets, detectWorkbuddy,
+  agentSummary, listAgents, detectWorkbuddy,
 };

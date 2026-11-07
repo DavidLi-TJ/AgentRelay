@@ -259,7 +259,7 @@ function writeSession(msx, { cwd, newId, dbFile, baseDir } = {}) {
         }
       }
       if (!seq) throw new Error('没有可写入的内容条目');
-      db.exec(`UPDATE session SET time_updated = ${Math.max(lastTs, firstTs)} WHERE id = '${id.replace(/'/g, "''")}'`);
+      db.prepare('UPDATE session SET time_updated = ? WHERE id = ?').run(Math.max(lastTs, firstTs), id);
       const out = { id, path: target, loss, count: seq };
       db.exec('COMMIT');
       return out;

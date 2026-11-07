@@ -656,7 +656,7 @@ input[type="range"]:focus { outline: none; box-shadow: none; }
 .entries-head { background: var(--surface); position: static; backdrop-filter: none; }
 .entries-head .divider { width: 1px; height: 20px; background: var(--border2); }
 .entries-head .input { padding: 6px 10px; }
-.bundle-card { margin-top: 16px; }
+.bundle-card { margin-top: 16px; border-style: dashed; } /* 虚线边框：跨设备"带出本机"的卡片，与前三步实体卡区分 */
 .bundle-card .relay-head .muted, .bundle-card p.muted { font-size: 14px; line-height: 20px; }
 .bundle-col .flabel { margin-bottom: 0; }
 .bundle-item { border: 1px solid var(--border); }

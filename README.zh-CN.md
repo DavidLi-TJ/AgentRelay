@@ -38,11 +38,12 @@ AgentRelay 搬的是会话本身：每条消息、每次工具调用和结果、
 
 ## 快速开始
 
-Windows 10/11，Node.js 22.5 以上（为了内置的 `node:sqlite`）。零 npm 依赖，不需要 `npm install`。
+Windows 10/11（已完整验证），Node.js 22.5 以上（为了内置的 `node:sqlite`）。零 npm 依赖，不需要 `npm install`。Linux/macOS：适配器读取同样的 `~/.` 路径，存储路径已就绪，但尚未广泛实测——欢迎实际使用并反馈问题（异常请开 issue）。
 
 ```bash
 npx github:DavidLi-TJ/AgentRelay serve  # 一条命令，然后打开 http://127.0.0.1:17777
-# 或者：克隆后双击 StartAgentRelay.bat
+# 或者：克隆后双击 StartAgentRelay.bat（Windows）
+# 或者：克隆后运行 ./start.sh（Linux/macOS）
 ```
 
 装完事。浏览器自动打开 `http://127.0.0.1:17777`。

@@ -8,14 +8,14 @@ English: [USER-GUIDE.md](USER-GUIDE.md)
 
 ## 1. 安装与启动
 
-需要 **Windows 10/11**（macOS/Linux 理论可用，尚未完整测试）和 **Node.js 22.5+**（使用内置 `node:sqlite`）。无需安装任何东西——零依赖、零构建。
+需要 **Windows 10/11**（已完整验证；macOS/Linux 存储路径已就绪、尚未广泛实测，欢迎反馈）和 **Node.js 22.5+**（使用内置 `node:sqlite`）。无需安装任何东西——零依赖、零构建。
 
 三种启动方式：
 
 ```bash
 npx github:DavidLi-TJ/AgentRelay serve        # 一条命令，无需克隆仓库
 # 或者克隆后：
-node server/index.js                          # 或双击 StartAgentRelay.bat
+node server/index.js                          # 或双击 StartAgentRelay.bat（Windows）/ 运行 ./start.sh（Linux/macOS）
 ```
 
 浏览器会打开 `http://127.0.0.1:17777`，服务只监听本机。如果端口被占用，设置环境变量 `AGENTRELAY_PORT=17778`（或任意空闲端口）再启动。

@@ -8,14 +8,14 @@ A walkthrough of every screen and every action, in the order you'll actually use
 
 ## 1. Install and launch
 
-You need **Windows 10/11** (macOS/Linux should work, not yet fully tested) and **Node.js 22.5+** (for the built-in `node:sqlite`). There is nothing to install — no `npm install`, no dependencies, no build step.
+You need **Windows 10/11** (fully verified; macOS/Linux storage paths are in place but not yet broadly field-tested — feedback welcome) and **Node.js 22.5+** (for the built-in `node:sqlite`). There is nothing to install — no `npm install`, no dependencies, no build step.
 
 Three ways to start:
 
 ```bash
 npx github:DavidLi-TJ/AgentRelay serve        # one-off, no clone needed
 # or, after cloning:
-node server/index.js                          # or double-click StartAgentRelay.bat
+node server/index.js                          # or double-click StartAgentRelay.bat (Windows) / run ./start.sh (Linux/macOS)
 ```
 
 A browser window opens at `http://127.0.0.1:17777`. The server listens on localhost only. If the port is taken, set `AGENTRELAY_PORT=17778` (or any free port) and start again.

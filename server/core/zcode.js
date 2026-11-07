@@ -297,7 +297,7 @@ function writeSession(msx, { cwd, newId, dbFile, baseDir } = {}) {
         db.prepare(`INSERT INTO session_input (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`).run(...names.map((n) => row[n]));
       } catch (err) { loss.push('session_input 写入失败（不影响消息体）: ' + err.message); }
     }
-    db.exec(`UPDATE session SET time_updated = ${Math.max(lastTs, firstTs)} WHERE id = '${id.replace(/'/g, "''")}'`);
+    db.prepare('UPDATE session SET time_updated = ? WHERE id = ?').run(Math.max(lastTs, firstTs), id);
     const out = { id, path: target, loss, count: seq };
     db.exec('COMMIT');
     return out;

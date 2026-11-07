@@ -42,11 +42,12 @@ One more thing worth saying plainly: everything above happens in a browser page.
 
 ## Quick start
 
-Windows 10/11, Node.js 22.5 or newer (for the built-in `node:sqlite` module). No `npm install` — there are no dependencies to install. macOS/Linux: the adapters target the same `~/.` paths and should work, but they are not yet fully tested there — issues welcome.
+Windows 10/11 (fully verified), Node.js 22.5 or newer (for the built-in `node:sqlite` module). No `npm install` — there are no dependencies to install. Linux/macOS: adapters read the same `~/.` paths and the storage paths are in place, but not yet broadly field-tested — real-world feedback is welcome (open an issue if something misbehaves).
 
 ```bash
 npx github:DavidLi-TJ/AgentRelay serve  # one command, then open http://127.0.0.1:17777
-# or: double-click StartAgentRelay.bat after cloning
+# or: double-click StartAgentRelay.bat after cloning (Windows)
+# or: ./start.sh after cloning (Linux/macOS)
 ```
 
 That is the whole setup. A browser window opens at `http://127.0.0.1:17777`. New here? The [user guide](docs/USER-GUIDE.md) walks through every screen in the order you'll use them.

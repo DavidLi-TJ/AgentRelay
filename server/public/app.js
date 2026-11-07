@@ -25,11 +25,9 @@ const state = {
   },
   searchActive: false,
   searchTimer: null,
-  targets: [],
   config: {},
   relay: null,
   relayPreset: null,
-  relayPresetOptions: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -545,7 +543,8 @@ function renderEntries() {
     const bodyHtml = editedText != null
       ? `<div class="entry-edited">${esc(editedText)}</div>`
       : (e.blocks || []).map(renderBlock).join('');
-    const text = entryText(e);
+    // 搜索匹配才拼纯文本（无过滤时 400 条 × 全文 join 是纯浪费）
+    const text = ql ? entryText(e) : '';
     const hit = ql ? text.toLowerCase().includes(ql) : true;
     if (ql && hit) matches++;
     const hitAttr = ql ? (hit ? ' data-hit="1"' : ' style="display:none"') : '';
@@ -572,8 +571,13 @@ function renderEntries() {
   const unloadedHint = (state.current.hasMore && state.excluded.size)
     ? `<div class="muted" style="padding:4px 24px">${esc(t('未加载的 N 条仍将包含在接力中（先点加载更多可全量控制）').replace('N', String(Math.max(0, state.current.total - msx.entries.length))))}</div>`
     : '';
+  // 编辑模式提示：改动只落在当前窗口（每屏 400 条），避免"改了看不见/以为全改了"的误解
+  const editHint = ed.on
+    ? `<div class="muted" style="padding:6px 24px 0; font-size:11px">${esc(t('编辑作用于当前窗口的 400 条；用「前/后 400 条」移动窗口，改动在保存时一并生效。'))}</div>`
+    : '';
   $('#entries').innerHTML
-    = unloadedHint
+    = editHint
+    + unloadedHint
     + (state.renderFrom > 0 ? `<button class="btn small ghost" id="win-prev" style="margin:10px auto 4px; display:block">← ${t('前 400 条')}（${state.renderFrom}）</button>` : '')
     + html
     + (ed.on ? renderInsertsAfter(null, roles) : '')
@@ -904,7 +908,6 @@ function bindDetailControls() {
   $('#btn-gorelay').addEventListener('click', () => {
     const c = state.current;
     state.relayPreset = [{ instance: c.instance, agent: c.agent, id: c.id, title: c.title }];
-    state.relayPresetOptions = currentOptions();
     activateView('relay');
     initRelayState();
     state.relay.selected.set(c.instance, new Set([c.id]));
@@ -936,7 +939,8 @@ function refreshPreview() {
     try {
       const r = await api('/api/preview', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceInstance: instance, sourceAgent: agent, sessionId: id, options: currentOptions() }),
+        // statsOnly：底部统计只用 stats/loss；大会话省掉全部条目摘要的序列化与传输
+        body: JSON.stringify({ sourceInstance: instance, sourceAgent: agent, sessionId: id, options: currentOptions(), statsOnly: true }),
       });
       if (seq !== previewSeq) return; // 旧响应后到，丢弃
       $('#preview-est').textContent =

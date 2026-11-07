@@ -77,8 +77,6 @@ async function route(req, res, u) {
       res.writeHead(200, { 'Content-Type': MIME_IMG[ext], 'Cache-Control': 'no-store' });
       return res.end(fs.readFileSync(fp));
     }
-    if (p === '/api/agents-full') return send(res, 200, agents.listAgents({ sessions: true }));
-    if (p === '/api/targets') return send(res, 200, agents.listTargets());
     if (p === '/api/log') {
       const limit = Math.min(Number(u.searchParams.get('limit')) || 300, 2000);
       return send(res, 200, readLogTail(limit));
@@ -541,6 +539,8 @@ async function route(req, res, u) {
           // 适配器级损失（sidechain 跳过等）与选择损失合并，预览与真实接力口径一致
           let msx = { ...src, entries, loss: [...(src.loss || []), ...loss] };
           if (options.redact) msx = redactMsx(msx);
+          // statsOnly：GUI 只用统计与损失说明；大会话省掉逐条摘要序列化（3000 条 ≈ 1MB JSON/次）
+          if (body.statsOnly) return send(res, 200, { stats: computeStats(msx.entries), loss: [...new Set(msx.loss || [])] });
           return send(res, 200, { stats: computeStats(msx.entries), loss: [...new Set(msx.loss || [])], entries: msx.entries.map(summarizeEntry) });
         }
         if (!targets || !targets.length) return send(res, 400, { error: 'targets 不能为空' });
