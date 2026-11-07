@@ -6,6 +6,27 @@
   "bin": {
     "agentrelay": "cli.js"
   },
+  "files": [
+    "server",
+    "cli.js",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DavidLi-TJ/AgentRelay.git"
+  },
+  "keywords": [
+    "claude",
+    "codex",
+    "zcode",
+    "ai-agent",
+    "session",
+    "relay",
+    "handoff",
+    "mcp"
+  ],
   "scripts": {
     "start": "node server/index.js",
     "test": "node scripts/sandbox-test.js",

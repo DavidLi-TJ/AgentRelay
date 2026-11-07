@@ -6,7 +6,7 @@
 
 **Move a half-finished coding session from one AI agent to another — the whole session, not a summary of it.**
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE) [![CI](https://github.com/DavidLi-TJ/AgentRelay/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidLi-TJ/AgentRelay/actions/workflows/ci.yml) [![Node](https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org) [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg?style=flat-square)](#quick-start) [![npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-success.svg?style=flat-square)](#quick-start)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE) [![CI](https://github.com/DavidLi-TJ/AgentRelay/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidLi-TJ/AgentRelay/actions/workflows/ci.yml) [![M8ven Score](https://m8ven.com/badge/mcp/davidli-tj/agentrelay)](https://m8ven.com/mcp/davidli-tj/agentrelay?s=readme) [![Node](https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org) [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg?style=flat-square)](#quick-start) [![npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-success.svg?style=flat-square)](#quick-start)
 
 English ｜ [简体中文](README.zh-CN.md) · [User guide](docs/USER-GUIDE.md) · [Quick start](#quick-start) · [Support matrix](#support-matrix) · [Relay tiers](#three-ways-to-relay) · [FAQ](#faq)
 
