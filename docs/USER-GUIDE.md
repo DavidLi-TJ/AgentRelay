@@ -174,8 +174,8 @@ Native (T0/T1) writes into DSH need the zstd support built into Node ≥ 23.8. O
 </details>
 
 <details>
-<summary>What about Trae?</summary>
-Trae encrypts its agent database with SQLCipher and the key lives inside Trae's own backend, so there is no safe native write. A T2 relay into a Trae project (verbatim transcript + kickoff prompt) still works.
+<summary>What about Trae / Doubao Work?</summary>
+Trae encrypts its agent database with SQLCipher and the key lives inside Trae's own backend, so there is no safe native write. Doubao Work keeps its transcripts inside the app's IndexedDB/cloud with no local session store. For both, a T2 relay (verbatim transcript + kickoff prompt written into the target project folder) still works — paste the prompt into a new session there.
 </details>
 
 <details>

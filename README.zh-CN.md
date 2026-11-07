@@ -95,8 +95,9 @@ npx github:DavidLi-TJ/AgentRelay serve  # 一条命令，然后打开 http://127
 | Pi / OpenClaw（实验性） | 各自 JSONL | ✓ | T0 / T1 / T2 | 会话列表 |
 | VS Code Copilot（实验性） | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T0 / T1 / T2 | Chat History |
 | Cursor（实验性） | `globalStorage/state.vscdb`（`composerData`/`bubbleId` + `composerHeaders`） | ✓ | T1 / T2 | Chat History |
+| 豆包工作（实验性） | 应用内 IndexedDB + 云端（无本地会话库） | ✓ | T2 | 工作任务读取转写文件 |
 
-实验性适配器基于官方源码 schema 实现（Cursor 无导入 API，schema 来自社区逆向）并通过合成样本测试。注意：WorkBuddy 的国内版与国际版是两套独立安装，作为两张独立卡片出现，各自锁定 `~/.workbuddy` 与 `~/.workbuddy-ai`，绝不互相混扫；VS Code 不持久化工具输出，接力后的会话该处为占位；Cursor T1 写入时要求 Cursor 完全退出（退出时的内存态可能覆盖外部写入），写入前会快照工作区数据库；DeepSeek Harness 的 T0/T1 需要 Node ≥ 23.8 的内置 zstd（低版本界面会自动降级为 T2）。同一个 agent 可以在设置页添加多个实例（比如两个 Claude 配置目录）。
+实验性适配器基于官方源码 schema 实现（Cursor 无导入 API，schema 来自社区逆向）并通过合成样本测试。注意：WorkBuddy 的国内版与国际版是两套独立安装，作为两张独立卡片出现，各自锁定 `~/.workbuddy` 与 `~/.workbuddy-ai`，绝不互相混扫；VS Code 不持久化工具输出，接力后的会话该处为占位；Cursor T1 写入时要求 Cursor 完全退出（退出时的内存态可能覆盖外部写入），写入前会快照工作区数据库；DeepSeek Harness 的 T0/T1 需要 Node ≥ 23.8 的内置 zstd（低版本界面会自动降级为 T2）。豆包工作（Doubao Work）的会话正文在其应用内 IndexedDB/云端，没有本地原生会话库，因此仅支持 T2：逐字转写写进它绑定的本地项目目录，结果面板给出启动提示词，新建工作任务粘贴即可继续。同一个 agent 可以在设置页添加多个实例（比如两个 Claude 配置目录）。
 
 ## 与同类工具的对比
 

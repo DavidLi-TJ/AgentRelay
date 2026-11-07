@@ -174,8 +174,8 @@ AgentRelay 就是几个 Node 内置模块加一个静态页面——服务空闲
 </details>
 
 <details>
-<summary>Trae 支持吗？</summary>
-Trae 用 SQLCipher 加密其 agent 数据库，密钥在 Trae 自己的后端内生成，因此没有安全的原生写入路径。向 Trae 项目做 T2 接力（逐字转写 + 启动提示词）依然可用。
+<summary>Trae / 豆包工作支持吗？</summary>
+Trae 用 SQLCipher 加密其 agent 数据库，密钥在 Trae 自己的后端内生成，因此没有安全的原生写入路径；豆包工作的会话正文在其应用内 IndexedDB/云端，没有本地会话库。两者都可走 T2 接力（逐字转写 + 启动提示词写进目标项目文件夹）——把提示词粘贴到那边的新会话/工作任务即可。
 </details>
 
 <details>
