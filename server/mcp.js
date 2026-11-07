@@ -35,6 +35,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'search_sessions',
+    description: '跨全部 agent 实例的会话正文做关键词全文搜索（含工具输出/思考块），返回命中会话与片段——适合"我之前在哪次会话里做过 X"这类检索，配合 get_session 深读',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: '关键词（≥2 字符；子串匹配，中英文均可）' },
+        instance: { type: 'string', description: '限定单个实例 id（来自 list_agents）；不填搜全部可用实例' },
+        limit: { type: 'number', description: '最多返回条数，默认 20，上限 60' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'get_session',
     description: '读取一个会话的逐字内容（消息流摘要 + 统计），用于了解接力源内容',
     inputSchema: {
@@ -118,6 +131,19 @@ async function callTool(name, args = {}) {
       return textResult(filtered.slice(0, limit).map((s) => ({
         id: s.id, title: s.title, agent: s.agent, cwd: s.cwd,
         lastActive: s.tsLast, messages: s.msgCount, tokens: s.tokens || null,
+      })));
+    }
+    case 'search_sessions': {
+      const q = String(args.q || '').trim();
+      if (q.length < 2) return textResult({ error: 'q 至少 2 个字符' }, true);
+      const results = await require('./core/search').searchAll({
+        q,
+        instanceId: args.instance || null,
+        limit: Math.min(Number(args.limit) > 0 ? Number(args.limit) : 20, 60),
+      });
+      return textResult(results.map((r) => ({
+        id: r.sessionId, title: r.title, agent: r.agent, instance: r.instance,
+        cwd: r.cwd, hits: r.hits, sample: r.sample,
       })));
     }
     case 'get_session': {

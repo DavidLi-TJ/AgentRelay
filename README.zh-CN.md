@@ -30,7 +30,7 @@ AgentRelay 搬的是会话本身：每条消息、每次工具调用和结果、
 - **带走多少自己定**：逐条勾选；也可以用开关批量定——思考块、工具结果、系统注入、起始条数、token 上限、密钥正则脱敏。
 - **写进目标的原生存储**：合成为目标 agent 自己的会话格式并注册，`claude --resume`、`codex resume`、桌面端会话列表直接认。
 - **先备份再写入**：任何会触碰既有数据库的写入前都做一致性快照（SQLite `VACUUM INTO`），保留 20 份，诊断页一键还原；只新建文件的接力无需备份。
-- **在 agent 里对话式接力**：内置 stdio MCP server，六个工具，Claude 或 Codex 可以在你聊天时把会话递给另一个 agent。
+- **在 agent 里对话式接力**：内置 stdio MCP server，七个工具（含跨全部 agent 的会话正文全文搜索），Claude 或 Codex 可以在你聊天时把会话递给另一个 agent。
 
 <div align="center">
 <img src="docs/assets/detail-preview.png" alt="逐字预览与逐条勾选" width="720">
@@ -134,7 +134,7 @@ npx @ldavidl/agentrelay serve  # 一条命令，然后打开 http://127.0.0.1:17
 claude mcp add agentrelay -- node C:\path\to\agentrelay\cli.js mcp
 ```
 
-六个工具：`list_agents`、`list_sessions`、`get_session`、`preview_transfer`、`transfer`、`doctor`。`transfer` 不带 `confirm: true` 就只做 dry-run。详见 [docs/MCP.md](docs/MCP.md)。
+七个工具：`list_agents`、`list_sessions`、`search_sessions`（跨全部 agent 的会话正文全文搜索）、`get_session`、`preview_transfer`、`transfer`、`doctor`。`transfer` 不带 `confirm: true` 就只做 dry-run。详见 [docs/MCP.md](docs/MCP.md)。
 
 ## 安全
 

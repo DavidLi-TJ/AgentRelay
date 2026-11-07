@@ -35,8 +35,8 @@ function openDb(dbFile, baseDir) {
   return new DatabaseSync(dest);
 }
 
-function findSessionFile(sessionId, baseDir) {
-  const root = projectsRoot(baseDir);
+function findSessionFile(sessionId, baseDir, rootOverride) {
+  const root = rootOverride || projectsRoot(baseDir);
   if (!fs.existsSync(root)) return null;
   for (const d of fs.readdirSync(root)) {
     const dir = path.join(root, d);
@@ -129,6 +129,57 @@ async function readSession(sessionId, baseDir) {
     stats, entries, compactions, loss,
     _fileStat: { size: fs.statSync(file).size, mtimeMs: fs.statSync(file).mtimeMs },
   };
+}
+
+// ---------- T0 同源复制：新会话 id + 克隆 sessions 行 + 重写 jsonl 的 sessionId 字段（cwd/时间原样） ----------
+function copySession(sessionId, { baseDir, dbFile, projectsDir } = {}) {
+  const srcFile = fs.existsSync(sessionId) ? sessionId : findSessionFile(sessionId, baseDir, projectsDir);
+  if (!srcFile) throw new Error(`WorkBuddy T0：源会话文件不存在: ${sessionId}`);
+  const id = randomUUID();
+  const dir = projectsDir || path.dirname(srcFile);
+  ensureDir(dir);
+  const file = path.join(dir, id + '.jsonl');
+  // 逐行重写 sessionId；行内 id/parentId 链原样保留（引用一致性不变），无法解析的行原样照抄（逐字原则）
+  const raw = fs.readFileSync(srcFile, 'utf8');
+  const out = [];
+  let count = 0;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    count++;
+    try {
+      const o = JSON.parse(line);
+      if (o.sessionId !== undefined) o.sessionId = id;
+      out.push(JSON.stringify(o));
+    } catch { out.push(line); }
+  }
+  fs.writeFileSync(file, out.join('\n') + '\n');
+  // 克隆 sessions 行（时间原样）+ session_usage；DB 失败补偿删除已落盘 jsonl
+  const targetDb = dbFile || dbPath(baseDir);
+  let db;
+  try {
+    db = new DatabaseSync(targetDb);
+    db.exec('PRAGMA busy_timeout=4000');
+    const src = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+    if (src) {
+      const cols = db.prepare('PRAGMA table_info(sessions)').all().map((c) => c.name);
+      const row = { ...src, id };
+      const names = cols.filter((n) => row[n] !== undefined);
+      db.prepare(`INSERT INTO sessions (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`).run(...names.map((n) => row[n]));
+      try {
+        const u = db.prepare('SELECT * FROM session_usage WHERE session_id = ?').get(sessionId);
+        if (u) {
+          const ucols = db.prepare('PRAGMA table_info(session_usage)').all().map((c) => c.name);
+          const urow = { ...u, session_id: id };
+          const unames = ucols.filter((n) => urow[n] !== undefined);
+          db.prepare(`INSERT INTO session_usage (${unames.map((n) => '"' + n + '"').join(',')}) VALUES (${unames.map(() => '?').join(',')})`).run(...unames.map((n) => urow[n]));
+        }
+      } catch { /* session_usage 非致命 */ }
+    }
+  } catch (e) {
+    try { fs.rmSync(file, { force: true }); } catch { }
+    throw e;
+  } finally { if (db) db.close(); }
+  return { id, path: file, count };
 }
 
 // ---------- 写入（T1：合成 jsonl + sessions 表注册） ----------
@@ -228,4 +279,4 @@ function doctor(baseDir) {
   return { agent: 'workbuddy', ok, storage: dbPath(baseDir), sessionFiles: sessions, projectsRoot: projectsRoot(baseDir) };
 }
 
-module.exports = { listSessions, readSession, writeSession, doctor, dbPath, findSessionFile };
+module.exports = { listSessions, readSession, writeSession, copySession, doctor, dbPath, findSessionFile };

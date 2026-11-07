@@ -47,8 +47,8 @@ const ok = (v) => (v.startsWith('OK') ? '✓' : v.startsWith('WARN') ? '~' : '�
 
   const tools = await rpc('tools/list', {});
   const names = tools.result.tools.map((t) => t.name);
-  const expect = ['list_agents', 'list_sessions', 'get_session', 'preview_transfer', 'transfer', 'doctor'];
-  out.push(['tools/list', expect.every((n) => names.includes(n)) ? 'OK 6 tools' : 'FAIL ' + names.join(',')]);
+  const expect = ['list_agents', 'list_sessions', 'search_sessions', 'get_session', 'preview_transfer', 'transfer', 'doctor'];
+  out.push(['tools/list', expect.every((n) => names.includes(n)) ? `OK ${expect.length} tools` : 'FAIL ' + names.join(',')]);
 
   const agents = textOf(await rpc('tools/call', { name: 'list_agents', arguments: {} }));
   const on = Array.isArray(agents) ? agents.filter((a) => a.available) : [];
@@ -59,6 +59,10 @@ const ok = (v) => (v.startsWith('OK') ? '✓' : v.startsWith('WARN') ? '~' : '�
   out.push(['list_sessions', list.length ? `OK ${list.length} sessions` : 'FAIL empty']);
   if (!list.length) throw new Error('no claude sessions');
   const sid = list[0].id;
+
+  const sr = textOf(await rpc('tools/call', { name: 'search_sessions', arguments: { q: 'CI' } }));
+  const srList = Array.isArray(sr) ? sr : [];
+  out.push(['search_sessions', srList.length && srList.some((x) => (x.title || '').includes('CI')) ? `OK ${srList.length} hits` : 'FAIL ' + JSON.stringify(sr).slice(0, 120)]);
 
   const got = textOf(await rpc('tools/call', { name: 'get_session', arguments: { agent: 'claude', id: sid } }));
   out.push(['get_session (id)', typeof got === 'string' && got.includes('标题:') ? 'OK' : 'FAIL ' + String(got).slice(0, 80)]);

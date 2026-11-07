@@ -240,6 +240,20 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
         const r = zcode.copySession(sessionId, { dbFile: dbFileOverride, baseDir: tgtBase });
         result.id = r.id; result.path = r.path; result.count = r.count;
         result.resumeCommand = `在 ZCode 桌面端会话列表打开「${result.title}」（新会话 id: ${r.id}）`;
+      } else if (targetAgent === 'workbuddy') {
+        if (!dbFileOverride) runBackupIfEnabled('workbuddy', tgtBase, 'workbuddy-t0', result, backup, cwd);
+        const r = await workbuddy.copySession(sessionId, { dbFile: dbFileOverride, baseDir: tgtBase });
+        result.id = r.id; result.path = r.path; result.count = r.count;
+        result.resumeCommand = `在 WorkBuddy 桌面端打开项目会话列表选择「${result.title}」（新会话 id: ${r.id}）`;
+        result.notes.push('T0 = 同源原生复制：内容原样保留（仅替换会话 id），源会话不变');
+      } else if (targetAgent === 'opencode') {
+        const oc = require('./opencode');
+        if (!dbFileOverride) runBackupIfEnabled('opencode', tgtBase, 'opencode-t0', result, backup, cwd);
+        const r = oc.copySession(sessionId, { dbFile: dbFileOverride, baseDir: tgtBase });
+        result.id = r.id; result.path = r.path; result.count = r.count;
+        if (r.notes && r.notes.length) result.notes.push(...r.notes);
+        result.resumeCommand = `在 OpenCode 会话列表选择「${result.title}」（新会话 id: ${r.id}）`;
+        result.notes.push('T0 = 同源原生复制：内容原样保留（仅替换会话 id），源会话不变');
       } else {
         // 通用文件型 T0：gemini / pi / openclaw / vscode / dsh 的 rawCopy（同源纯复制，只新建文件、无需备份）
         const r = await ad.rawCopy(sessionId, { baseDir: tgtBase });

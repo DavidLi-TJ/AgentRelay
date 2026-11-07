@@ -134,7 +134,7 @@ node cli.js import-bundle out.arxbundle --to codex --remap "D:/work=/Users/x/wor
 claude mcp add agentrelay -- node C:\path\to\agentrelay\cli.js mcp
 ```
 
-之后直接在对话里让 agent 替你接力。六个工具：`list_agents`、`list_sessions`、`get_session`、`preview_transfer`、`transfer`、`doctor`。`transfer` 不传 `confirm: true` 时始终是 dry-run。完整参考：[MCP.md](MCP.md)。
+之后直接在对话里让 agent 替你接力。七个工具：`list_agents`、`list_sessions`、`search_sessions`（跨全部 agent 的会话正文全文搜索）、`get_session`、`preview_transfer`、`transfer`、`doctor`。`transfer` 不传 `confirm: true` 时始终是 dry-run。完整参考：[MCP.md](MCP.md)。
 
 ## 11. CLI 参考
 

@@ -270,6 +270,68 @@ function writeSession(msx, { cwd, newId, dbFile, baseDir } = {}) {
   } finally { db.close(); }
 }
 
+// ---------- T0 同源复制：同库事务内克隆 session 行 + 全部带 session_id 的子表 ----------
+// 行 id 重新生成（message id 供 part.message_id 等外键映射），时间/cwd/标题原样保留
+function copySession(sessionId, { baseDir, dbFile } = {}) {
+  const target = dbFile || dbPath(baseDir);
+  if (!fs.existsSync(target)) throw new Error('OpenCode T0：目标库不存在: ' + target);
+  const db = new DatabaseSync(target);
+  const notes = [];
+  try {
+    db.exec('PRAGMA busy_timeout=4000');
+    const src = db.prepare('SELECT * FROM session WHERE id = ?').get(sessionId);
+    if (!src) throw new Error('OpenCode T0：源会话不存在: ' + sessionId);
+    const id = `ses_${randomUUID()}`;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const sCols = db.prepare('PRAGMA table_info("session")').all().map((c) => c.name);
+      const sRow = { ...src, id };
+      const sNames = sCols.filter((n) => sRow[n] !== undefined);
+      db.prepare(`INSERT INTO session (${sNames.map((n) => '"' + n + '"').join(',')}) VALUES (${sNames.map(() => '?').join(',')})`).run(...sNames.map((n) => sRow[n]));
+      const q = (t) => '"' + String(t).replace(/"/g, '""') + '"';
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name)
+        .filter((n) => n && n !== 'session' && !n.startsWith('sqlite_'));
+      const idMaps = [];
+      let count = 0;
+      for (const t of tables) {
+        let cols;
+        try { cols = db.prepare(`PRAGMA table_info(${q(t)})`).all().map((c) => c.name); } catch { continue; }
+        if (!cols.includes('session_id')) continue;
+        const rows = db.prepare(`SELECT * FROM ${q(t)} WHERE session_id = ?`).all(sessionId);
+        if (!rows.length) continue;
+        const map = new Map();
+        idMaps.push(map);
+        for (const row of rows) {
+          const newRow = { ...row, session_id: id };
+          if (cols.includes('id') && row.id != null) {
+            const s = String(row.id);
+            const prefix = s.includes('_') ? s.slice(0, s.indexOf('_') + 1) : t.slice(0, 3) + '_';
+            let nid;
+            do { nid = prefix + randomUUID().replace(/-/g, '').slice(0, 20); } while (map.has(nid));
+            map.set(row.id, nid);
+            newRow.id = nid;
+          }
+          if (newRow.message_id != null) {
+            for (const m of idMaps) {
+              if (m.has(newRow.message_id)) { newRow.message_id = m.get(newRow.message_id); break; }
+            }
+          }
+          const names = cols.filter((n) => newRow[n] !== undefined);
+          try {
+            db.prepare(`INSERT INTO ${q(t)} (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`).run(...names.map((n) => newRow[n]));
+            count++;
+          } catch (e) { notes.push(`跳过 ${t} 1 行（${e.message.slice(0, 60)}）`); }
+        }
+      }
+      db.exec('COMMIT');
+      return { id, path: target, count, notes };
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch { }
+      throw e;
+    }
+  } finally { db.close(); }
+}
+
 function doctor(baseDir) {
   const p = dbPath(baseDir);
   let sessions = 0;
@@ -280,4 +342,4 @@ function doctor(baseDir) {
   return { agent: 'opencode', ok: fs.existsSync(p), storage: p, sessionFiles: sessions };
 }
 
-module.exports = { listSessions, readSession, writeSession, doctor, dbPath, getReadDbFile };
+module.exports = { listSessions, readSession, writeSession, copySession, doctor, dbPath, getReadDbFile };

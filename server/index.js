@@ -119,69 +119,8 @@ async function route(req, res, u) {
     if (p === '/api/search') {
       const q = (u.searchParams.get('q') || '').trim();
       const instanceId = u.searchParams.get('instance');
-      if (q.length < 2) return send(res, 200, { results: [] });
-      const results = [];
-      const deadline = Date.now() + 6000;
-      let insts = agents.allInstances().filter((i) => i.available);
-      if (instanceId) insts = insts.filter((i) => i.id === instanceId);
-      for (const inst of insts) {
-        if (Date.now() > deadline) break;
-        try {
-          const type = inst.type;
-          const baseDir = inst.baseDir;
-          if (type === 'zcode' || type === 'opencode') {
-            const { DatabaseSync } = require('node:sqlite');
-            const dbp = type === 'zcode' ? require('./core/zcode').dbPath(baseDir) : require('./core/opencode').dbPath(baseDir);
-            if (!fs.existsSync(dbp)) continue;
-            const copyFn = type === 'zcode' ? require('./core/zcode').getReadDbFile : require('./core/opencode').getReadDbFile;
-            const db = new DatabaseSync(copyFn(baseDir));
-            try {
-              const like = '%' + q.replace(/[%_]/g, '') + '%';
-              const rows = db.prepare("SELECT p.session_id, count(*) hits, substr(p.data, 1, 200) sample FROM part p WHERE p.data LIKE ? GROUP BY p.session_id ORDER BY hits DESC LIMIT 20").all(like);
-              for (const r of rows) {
-                const sess = db.prepare('SELECT title, directory FROM session WHERE id = ?').get(r.session_id);
-                results.push({ agent: type, instance: inst.id, sessionId: r.session_id, title: (sess && sess.title) || r.session_id, cwd: (sess && sess.directory) || '', hits: r.hits, sample: r.sample });
-              }
-            } finally { db.close(); }
-          } else {
-            const list = agents.listInstanceSessions(inst);
-            for (const sess of list) {
-              if (Date.now() > deadline) break;
-              const file = sess.file;
-              if (!file || !fs.existsSync(file)) continue;
-              try {
-                // 流式逐行搜索：WorkBuddy 有 745MB 的会话文件，整读会冻结事件循环
-                let hits = 0, sample = '';
-                await new Promise((resolve) => {
-                  const rl = require('readline').createInterface({
-                    input: fs.createReadStream(file, { encoding: 'utf8', highWaterMark: 1024 * 1024 }),
-                    crlfDelay: Infinity,
-                  });
-                  const needle = q.toLowerCase();
-                  rl.on('line', (line) => {
-                    const low = line.toLowerCase();
-                    if (low.includes(needle)) {
-                      hits++;
-                      if (!sample) {
-                        const parsed = safeParse(line, {}) || {};
-                        sample = truncateStr(JSON.stringify(parsed).slice(0, 260), 240);
-                      }
-                    }
-                    if (Date.now() > deadline) rl.close();
-                  });
-                  rl.on('close', resolve);
-                  rl.on('error', () => resolve());
-                });
-                if (hits) {
-                  results.push({ agent: type, instance: inst.id, sessionId: sess.id, title: sess.title, cwd: sess.cwd, hits, sample });
-                  if (results.length > 60) break;
-                }
-              } catch { }
-            }
-          }
-        } catch (e) { logger.warn('search-instance', { instance: inst.id, error: e.message }); }
-      }
-      return send(res, 200, { results: results.slice(0, 60) });
+      const results = await require('./core/search').searchAll({ q, instanceId });
+      return send(res, 200, { results });
     }
     if (p === '/api/backups') {
       const { backupDir } = require('./core/util');

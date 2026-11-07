@@ -134,7 +134,7 @@ Register once:
 claude mcp add agentrelay -- node C:\path\to\agentrelay\cli.js mcp
 ```
 
-Then ask your agent to do relays conversationally. Six tools: `list_agents`, `list_sessions`, `get_session`, `preview_transfer`, `transfer`, `doctor`. `transfer` stays dry-run unless you pass `confirm: true`. Full reference: [MCP.md](MCP.md).
+Then ask your agent to do relays conversationally. Seven tools: `list_agents`, `list_sessions`, `search_sessions` (full-text across all agents' session bodies), `get_session`, `preview_transfer`, `transfer`, `doctor`. `transfer` stays dry-run unless you pass `confirm: true`. Full reference: [MCP.md](MCP.md).
 
 ## 11. CLI reference
 

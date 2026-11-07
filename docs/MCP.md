@@ -9,6 +9,7 @@
 |---|---|---|
 | `list_agents` | 列出本机检测到的 agent 实例与存储路径 | 无 |
 | `list_sessions` | 列出会话（可按关键词过滤） | 无 |
+| `search_sessions` | **跨全部 agent 的会话正文全文搜索**（含工具输出/思考块），返回命中会话与片段——"我之前在哪次会话做过 X" | 无 |
 | `get_session` | 读取会话逐字内容（预览） | 无 |
 | `preview_transfer` | **Dry-run**：预演接力将写入什么 | 无 |
 | `transfer` | 执行接力；**`confirm:true` 才真正写入**，否则自动降级为 dry-run | 有（需显式确认） |
@@ -47,6 +48,7 @@ args = ["C:\\path\\to\\AgentRelay\\server\\mcp.js"]
 ## 使用示例（agent 内对话）
 
 > "用 agentrelay 列出我的 zcode 会话"
+> "用 agentrelay 全文搜一下我哪次会话里处理过 zstd 压缩"
 > "把这个会话接力给 codex，项目目录 C:\path\to\my-project，先 dry-run"
 > "确认执行（confirm=true）"
 

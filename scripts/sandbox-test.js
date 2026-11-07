@@ -110,6 +110,19 @@ const nowIso = () => new Date().toISOString();
   const back4 = await workbuddy.readSession(r4.path);
   console.log(`  codex→workbuddy(副本): lines=${r4.count} 回读entries=${back4.stats.entries} user=${back4.stats.userTurns}`);
 
+  // workbuddy T0 同源复制（db 副本 + 沙盒 projectsDir；新 id 文件 + sessions 行克隆 + sessionId 字段重写）
+  const wbT0 = workbuddy.copySession(r4.id, { dbFile: wcopy, projectsDir: path.join(SANDBOX, 'wb-projects') });
+  const wbT0Lines = JSON.parse(require('fs').readFileSync(wbT0.path, 'utf8').trim().split('\n')[0]);
+  const wbT0Db = new (require('node:sqlite').DatabaseSync)(wcopy);
+  const wbT0Rows = wbT0Db.prepare('SELECT count(*) c FROM sessions WHERE id = ?').get(wbT0.id).c;
+  const wbT0Dup = wbT0Db.prepare('SELECT count(*) c FROM sessions WHERE id = ?').get(r4.id).c;
+  wbT0Db.close();
+  if (wbT0Rows !== 1 || wbT0Dup !== 1 || wbT0Lines.sessionId !== wbT0.id) throw new Error('workbuddy T0 克隆异常');
+  console.log(`  workbuddy T0: 新id=${wbT0.id.slice(0, 8)} lines=${wbT0.count} sessions行=1 源保留=1`);
+  // 用副本文件直接读回验证内容一致
+  const wbT0Read = await workbuddy.readSession(wbT0.path);
+  if (wbT0Read.entries.length !== back4.stats.entries) throw new Error('workbuddy T0 回读条数不一致');
+
   // zcode → claude
   const r5 = claude.writeSession(zcodeMsx, { cwd: projA });
   const back5 = claude.readSession(r5.id);
@@ -143,6 +156,25 @@ const nowIso = () => new Date().toISOString();
   if (vMsx.project.cwd !== 'c:/demo/shop-frontend' || vMsx.stats.entries < 5) throw new Error('vscode readSession 异常');
   if (!vMsx.entries.some((e) => (e.blocks || []).some((b) => b.type === 'tool_use'))) throw new Error('vscode tool_use 缺失');
   console.log(`  vscode: ${vList.length} 会话, read=${vMsx.stats.entries}条 cwd=${vMsx.project.cwd}`);
+
+  // opencode T0（真实库副本上克隆：session 行 + 子表行数一致 + 回读非空）
+  const opencode = require('../server/core/opencode');
+  const ocopy = path.join(SANDBOX, 'opencode-copy.db');
+  for (const ext of ['', '-wal', '-shm']) {
+    const s = opencode.dbPath(null) + ext;
+    if (fs.existsSync(s)) fs.copyFileSync(s, ocopy + ext);
+  }
+  const oSrc = opencode.listSessions()[0];
+  const oT0 = opencode.copySession(oSrc.id, { dbFile: ocopy });
+  const odb = new (require('node:sqlite').DatabaseSync)(ocopy);
+  const oSrcParts = odb.prepare('SELECT count(*) c FROM part WHERE session_id = ?').get(oSrc.id).c;
+  const oNewParts = odb.prepare('SELECT count(*) c FROM part WHERE session_id = ?').get(oT0.id).c;
+  const oNewSess = odb.prepare('SELECT count(*) c FROM session WHERE id = ?').get(oT0.id).c;
+  odb.close();
+  if (!oNewSess || !oSrcParts || oNewParts !== oSrcParts) throw new Error('opencode T0 子表克隆行数不一致');
+  const oBack = await opencode.readSession(oT0.id, { dbFile: ocopy });
+  if (!oBack.entries.length) throw new Error('opencode T0 回读为空');
+  console.log(`  opencode T0: parts=${oNewParts}/${oSrcParts} 回读=${oBack.stats.entries}条`);
 
   // ---------- 新增 T1/T0 写入器（全部沙盒目录，回读验证） ----------
   const gemini = require('../server/core/gemini');

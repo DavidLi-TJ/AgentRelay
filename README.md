@@ -34,7 +34,7 @@ One more thing worth saying plainly: everything above happens in a browser page.
 - **Carry only what you want.** Check entries one by one, or set the stage with toggles for thinking blocks, tool results, and system injections, a from-entry offset, a token cap, and regex-based secret redaction.
 - **Write into the target, not at it.** Relay synthesizes the target agent's own session format and registers it, so `claude --resume` / `codex resume` / the desktop session list just works.
 - **Back up first, always.** Any write that touches an existing database takes a consistent SQLite snapshot (`VACUUM INTO`) first; relays that only create brand-new files don't need one. Twenty are kept, and the Diagnostics page restores any of them.
-- **Relay from inside an agent.** A stdio MCP server exposes six tools, so Claude or Codex can hand a session to another agent while you talk to it.
+- **Relay from inside an agent.** A stdio MCP server exposes seven tools — including full-text search across every agent's sessions — so Claude or Codex can find and hand a session to another agent while you talk to it.
 
 <div align="center">
 <img src="docs/assets/detail-preview.png" alt="Verbatim preview with per-entry checkboxes" width="720">
@@ -138,7 +138,7 @@ Register once, then relay conversationally:
 claude mcp add agentrelay -- node C:\path\to\agentrelay\cli.js mcp
 ```
 
-Six tools: `list_agents`, `list_sessions`, `get_session`, `preview_transfer`, `transfer`, `doctor`. `transfer` is dry-run unless you pass `confirm: true`. Details in [docs/MCP.md](docs/MCP.md).
+Seven tools: `list_agents`, `list_sessions`, `search_sessions` (full-text across all agents' session bodies), `get_session`, `preview_transfer`, `transfer`, `doctor`. `transfer` is dry-run unless you pass `confirm: true`. Details in [docs/MCP.md](docs/MCP.md).
 
 ## Safety
 
