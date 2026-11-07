@@ -172,10 +172,25 @@ async function readMsxInstance(instanceId, sessionId) {
 async function readMsx(type, sessionId) {
   const insts = loadInstances().filter((i) => i.type === type);
   if (!insts.length) throw new Error(`agent ${type} 未启用或未安装`);
+  // 短 id 前缀（CLI list 只展示 8 位）：跨该类型全部实例收集唯一命中并展开；多命中报错
+  let sid = String(sessionId);
+  if (sid.length <= 16) {
+    const full = new Set();
+    for (const inst of insts) {
+      try {
+        for (const s of listInstanceSessions(inst)) {
+          if (s.id === sid || s.id.startsWith(sid)) full.add(s.id);
+        }
+      } catch { }
+      if (full.size > 1) break;
+    }
+    if (full.size === 1) sid = [...full][0];
+    else if (full.size > 1) throw new Error(`id 前缀 "${sid}" 命中 ${full.size} 个会话，请提供更长的前缀或完整 id（list --verbose 可看）`);
+  }
   let lastErr = null;
   for (const inst of insts) {
     try {
-      const msx = await callReadSession(type, ADAPTERS[type], sessionId, inst.baseDir);
+      const msx = await callReadSession(type, ADAPTERS[type], sid, inst.baseDir);
       if (insts.length > 1) msx._resolvedInstance = inst.instanceId;
       return msx;
     } catch (e) { lastErr = e; }

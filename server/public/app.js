@@ -374,6 +374,7 @@ async function openDetail(instance, id) {
     state.current = {
       instance, agent: inst ? inst.type : 'claude', id, title: msx.source.title, msx,
       total: msx.total || msx.entries.length, hasMore: !!msx.hasMore, previewTruncated: !!msx.previewTruncated,
+      canSaveInPlace: msx.canSaveInPlace !== false,
     };
     state.excluded = new Set();
     state.edit = { on: false, removals: new Set(), edits: new Map(), inserts: [] };
@@ -468,7 +469,7 @@ function renderDetail() {
       <button class="btn small ${state.edit.on ? '' : 'ghost'}" id="btn-edit-mode" title="${esc(t('编辑上下文：删除/改写条目、插入用户/助手/工具内容、批量粘贴其他会话片段'))}">${esc(t('编辑模式'))}</button>
       <span class="muted" id="edit-dirty" style="display:none"></span>
       <span id="edit-savebox" style="display:none">
-        <button class="btn small primary" id="btn-save-inplace" title="${esc(t('把编辑写回该会话的原生存储（claude/zcode 支持；写前自动备份）'))}">${esc(t('就地保存'))}</button>
+        <button class="btn small primary" id="btn-save-inplace" ${state.current.canSaveInPlace === false ? `disabled title="${esc(t('该 agent 暂不支持就地保存，请用「另存为新会话」'))}"` : `title="${esc(t('把编辑写回该会话的原生存储（claude/zcode 支持；写前自动备份）'))}"`}>${esc(t('就地保存'))}</button>
         <button class="btn small" id="btn-save-new" title="${esc(t('把编辑后的内容另存为一个新会话（原会话不动，全部 agent 支持）'))}">${esc(t('另存为新会话'))}</button>
         <button class="btn small ghost" id="btn-edit-discard">${esc(t('放弃改动'))}</button>
       </span>
@@ -1707,8 +1708,10 @@ function bindSettings() {
         </div>`).join('')
       : '';
     $('#bundle-import-run').style.display = bundleData.sessions.length ? '' : 'none';
+    $('#bundle-import-dry').style.display = bundleData.sessions.length ? '' : 'none';
   }
-  $('#bundle-import-run').addEventListener('click', async () => {
+  // dryRun=false 真实导入（确认后写前备份）；dryRun=true 走同一管线但不落盘（对齐服务端/CLI/文档）
+  async function runBundleImport(dryRun) {
     if (!bundleData || !bundleData.sessions.length) return;
     const targets = [...((state.relay && state.relay.targets) || new Set())]
       .map((iid) => state.instances.find((a) => a.id === iid))
@@ -1723,14 +1726,15 @@ function bindSettings() {
     if (!remap.length && !uniCwd && chosen.some((s) => s.cwd)) {
       return toast(t('bundle 会话携带源机器路径：请填写重映射目标路径，或在上方填统一的目标项目目录'), 'warn');
     }
-    if (!window.confirm(t('将把 bundle 中的会话写入本机目标 agent 的真实存储（写前自动备份）。确认执行？'))) return;
+    if (!dryRun && !window.confirm(t('将把 bundle 中的会话写入本机目标 agent 的真实存储（写前自动备份）。确认执行？'))) return;
     $('#bundle-import-run').disabled = true;
+    $('#bundle-import-dry').disabled = true;
     const all = [];
     try {
       // 逐会话导入：大会话不再长时间无反馈，进度实时更新（渲染器与接力主流程复用 resultBoxHtml）
       for (let k = 0; k < chosen.length; k++) {
         const s = chosen[k];
-        $('#bundle-import-note').textContent = t('导入中…') + ` ${k + 1}/${chosen.length} — ${s.title.slice(0, 40)}`;
+        $('#bundle-import-note').textContent = (dryRun ? t('Dry-run 预览中…') : t('导入中…')) + ` ${k + 1}/${chosen.length} — ${s.title.slice(0, 40)}`;
         try {
           const r = await api('/api/bundle/import', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1738,7 +1742,7 @@ function bindSettings() {
               file: $('#bundle-file').value.trim(), remap,
               targets: targets.map((tg) => ({ ...tg, cwd: uniCwd || undefined })),
               options: batchOptions(), backup: $('#relay-backup').checked,
-              only: [s.index],
+              only: [s.index], dryRun,
             }),
           });
           all.push(...(r.results || []));
@@ -1752,12 +1756,15 @@ function bindSettings() {
       if (state.relay) state.relay.results = resultsHtml;
       $('#relay-results').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       const ok = all.filter((x) => x.ok).length;
-      toast(`${t('导入完成')}: ${ok}/${all.length}`, ok === all.length ? '' : 'warn');
-      loadAgents(true);
+      toast(`${dryRun ? t('Dry-run 完成') : t('导入完成')}: ${ok}/${all.length}`, ok === all.length ? '' : 'warn');
+      if (!dryRun) loadAgents(true);
     } finally {
       $('#bundle-import-run').disabled = false;
+      $('#bundle-import-dry').disabled = false;
     }
-  });
+  }
+  $('#bundle-import-run').addEventListener('click', () => runBundleImport(false));
+  $('#bundle-import-dry').addEventListener('click', () => runBundleImport(true));
   $('#btn-clear-bg').addEventListener('click', () => { $('#set-bgimage').value = ''; applyBgImage(''); });
   // 背景图输入即时预览（防抖），无需先点保存
   let bgTimer = null;
@@ -1895,6 +1902,8 @@ renderQuickStart();
 const savedView = localStorage.getItem('ms-view');
 if (savedView && savedView !== 'sessions' && $('#view-' + savedView)) activateView(savedView);
 maybeShowWizard();
+// 更新检查：开启时启动查一次（1h 节流在 checkUpdateOnce 内）——与设置页"启动时检查新版本"文案一致
+api('/api/config').then((c) => { state.config = { ...state.config, ...c }; checkUpdateOnce(); }).catch(() => { });
 loadAgents().catch((e) => {
   $('#server-status').style.background = 'var(--err)';
   toast(t('初始化失败: ') + e.message, 'err');

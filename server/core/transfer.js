@@ -208,7 +208,7 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
         const dir = ensureDir(path.join(cwd, '.agentrelay'));
         const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         const sidPart = String(sessionId).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8) || 'session';
-        const name = `handoff-${stamp}-${sourceAgent}-${sidPart}.md`;
+        const name = `handoff-${stamp}-${(msx.source && msx.source.agent) || sourceAgent}-${sidPart}.md`;
         const file = path.join(dir, name);
         await writeBundleStream(msx, file);
         result.path = file;

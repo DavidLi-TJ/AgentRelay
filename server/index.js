@@ -8,7 +8,7 @@ const { URL } = require('url');
 const agents = require('./core/agents');
 const transfer = require('./core/transfer');
 const logger = require('./core/logger');
-const { readLogTail, appendLog, nowISO, HOME } = require('./core/util');
+const { readLogTail, appendLog, nowISO, HOME, safeParse, truncateStr } = require('./core/util');
 
 const VERSION = require('../package.json').version;
 const PORT = Number(process.env.AGENTRELAY_PORT || process.env.MOVESESSION_PORT || 17777);
@@ -242,7 +242,7 @@ async function route(req, res, u) {
         if (!inst) return send(res, 404, { error: '实例不存在: ' + instanceId });
         list = agents.listInstanceSessions(inst, { refresh });
       } else if (type) {
-        list = agents.agentSummary(type).sessions || [];
+        list = agents.agentSummary(type, { sessions: true }).sessions || [];
       } else return send(res, 400, { error: 'instance 或 agent 必填' });
       const filtered = q ? list.filter((s) => (s.title || '').toLowerCase().includes(q) || (s.cwd || '').toLowerCase().includes(q)) : list;
       // parent=<id>：返回该主会话的子会话（subagent / fork，zcode 等树形存储）
@@ -300,7 +300,11 @@ async function route(req, res, u) {
               ? { ...b, text: b.text.slice(0, 2048) + '…[预览截断，接力/导出仍为逐字全文]' } : b)),
           }));
         }
-        return send(res, 200, { ...msx, entries, total, offset, hasMore: offset + limit < total, previewTruncated });
+        // 响应瘦身：剥离内部字段（_storeSig/_fileStat 会泄露本地路径）；GUI 按 canSaveInPlace 禁用就地保存
+        const { _storeSig, _fileStat, ...rest } = msx;
+        const instType = instanceId ? ((agents.getInstance(instanceId) || {}).type) : agent;
+        const canSaveInPlace = !!(instType && agents.ADAPTERS[instType] && typeof agents.ADAPTERS[instType].saveSessionInPlace === 'function');
+        return send(res, 200, { ...rest, entries, total, offset, hasMore: offset + limit < total, previewTruncated, canSaveInPlace });
       } catch (e) { return send(res, 404, { error: e.message }); }
     }
     // 会话查重：同标题+同规模的分组（跨实例），供 GUI 呈现与清理

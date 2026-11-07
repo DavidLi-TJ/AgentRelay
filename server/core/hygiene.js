@@ -40,7 +40,9 @@ function pruneExports() {
       const p = path.join(dir, f);
       const st = fs.statSync(p);
       return { p, mtime: st.mtimeMs, isFile: st.isFile() };
-    }).filter((x) => x.isFile).sort((a, b) => b.mtime - a.mtime);
+    }).filter((x) => x.isFile)
+      // mtime 相同（批量导出）时按名称稳定排序，避免目录序误删最新文件
+      .sort((a, b) => (b.mtime - a.mtime) || b.p.localeCompare(a.p));
     for (const x of files.slice(EXPORTS_KEEP)) {
       try { fs.rmSync(x.p, { force: true }); } catch { }
     }
