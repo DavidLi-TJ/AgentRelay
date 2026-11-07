@@ -41,6 +41,7 @@ In the preview you can:
 
 - **Search inside** — the search field above the preview highlights matches and shows how many hits the current page has.
 - **Check entries** — tick the checkbox on any entry (or use select-all / select-none in the selection bar). Whatever is checked is exactly what the relay will carry.
+- **Export** — **Export MD** renders the session as a verbatim Markdown transcript (your selection and redaction apply; tool calls and thinking render as fenced/collapsible blocks); **Export ARX** writes the structured JSON intermediate for backup or re-loading later.
 - **Tune the selection** — the bar above the preview holds the switches: include thinking / tool results / system injections, secret redaction, a from-entry offset, tool-output truncation (KB), a token cap with **1M / 512K / 200K** presets, and **From last compact** — start the relay at the newest compaction boundary, so the target receives what the source agent still has in its head.
 - **Browse sub-agent sessions** — sessions that spawned subagents (currently ZCode) show them collapsed under the parent header; expand to read them, the box scrolls if there are many.
 
@@ -117,7 +118,7 @@ Every relay, backup, and settings change is logged here, newest first, filterabl
 
 ## 9. Settings
 
-- **Agent instances** — built-in agents can be enabled/disabled individually. *Add instance* registers an extra storage location for the same agent type (say, two Claude config directories) with a name and a data directory; *Detect* checks the path before you add it.
+- **Agent instances** — built-in agents can be enabled/disabled individually. WorkBuddy ships as two built-in cards — **domestic** (`~/.workbuddy`) and **international** (`~/.workbuddy-ai`) — each locked to its own directory and never mixed. *Add instance* registers an extra storage location for the same agent type (say, two Claude config directories) with a name and a data directory; *Detect* checks the path before you add it.
 - **General** — language, theme (dark / light / follow system), font size, log level.
 - **Background image** — paste a local image path or an https URL; it applies immediately and persists across restarts. The *glass strength* slider controls how frosted the panels are over it. Clear the field for the plain background.
 - **Data directory** — where backups, exports, cache, and logs go. New files go to the new location; existing ones stay put.
@@ -142,7 +143,7 @@ Then ask your agent to do relays conversationally. Six tools: `list_agents`, `li
 | `node cli.js agents` | List detected agents and session counts |
 | `node cli.js list <agent> [--q keyword]` | List sessions (add `--json`, `--verbose`) |
 | `node cli.js show <agent> <sessionId>` | Print a session's first entries (`--limit`) |
-| `node cli.js export <agent> <sessionId>` | Export a selected ARX file (`--out`, `--from/--to`, `--no-thinking`, `--truncate`, `--budget`, `--redact`) |
+| `node cli.js export <agent> <sessionId>` | Export as ARX JSON or Markdown (`--out`, `--format md`, `--from/--to`, `--no-thinking`, `--truncate`, `--budget`, `--redact`) |
 | `node cli.js load <file.arx.json> --into <agent> --cwd <path>` | Load a previously exported ARX file (`--mode`, `--dry-run`) |
 | `node cli.js transfer --from <agent>:<id> --to <agent>` | One-shot relay (`--cwd`, `--mode T0/T1/T2`, `--dry-run`) |
 | `node cli.js bundle <out> --from <agent>:<id> [...]` | Pack sessions for cross-device transfer (`--redact`) |

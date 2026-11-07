@@ -489,6 +489,7 @@ function renderDetail() {
       <span class="est" id="preview-est">${esc(t('统计中…'))}</span>
       <span style="flex:1"></span>
       <button class="btn primary" id="btn-gorelay">${esc(t('去接力'))}</button>
+      <button class="btn" id="btn-export-md">${esc(t('导出 MD'))}</button>
       <button class="btn" id="btn-export">${esc(t('导出 ARX'))}</button>
     </div>`;
   renderEntries();
@@ -909,6 +910,19 @@ function bindDetailControls() {
     renderRelay();
   });
   $('#btn-export').addEventListener('click', exportMsx);
+  $('#btn-export-md').addEventListener('click', () => exportMsx('md'));
+}
+
+async function exportMsx(format) {
+  const { instance, agent, id } = state.current;
+  try {
+    const r = await api('/api/export', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceInstance: instance, sourceAgent: agent, sessionId: id, options: currentOptions(), format }),
+    });
+    toast(`${t('已导出')} ${r.entries} ${t('条')} — ${r.file}`);
+    copyText(r.file);
+  } catch (e) { toast(t('导出失败: ') + e.message, 'err'); }
 }
 
 let previewTimer = null, previewSeq = 0;
@@ -940,18 +954,6 @@ function currentOptions() {
 }
 function batchOptions() {
   return { ...state.options, from: 0, excludeIds: [] };
-}
-
-async function exportMsx() {
-  const { instance, agent, id } = state.current;
-  try {
-    const r = await api('/api/export', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sourceInstance: instance, sourceAgent: agent, sessionId: id, options: currentOptions() }),
-    });
-    toast(`${t('已导出')} ${r.entries} ${t('条')} — ${r.file}`);
-    copyText(r.file);
-  } catch (e) { toast(t('导出失败: ') + e.message, 'err'); }
 }
 
 /* ---------------- 全文搜索 ---------------- */

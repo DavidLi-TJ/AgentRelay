@@ -44,14 +44,36 @@ if (typeof require('zlib').zstdCompressSync !== 'function') {
 }
 
 // ---- 实例 ----
+// 内置实例定义（每类型一张默认卡 + WorkBuddy 双版本）。
+// hideIfMissing：主界面未检测到存储时不占位（仍可在设置页启停 / 手动添加自定义实例）。
+const WORKBUDDY_INTL = 'workbuddy-intl';
+function builtinDefs() {
+  const defs = [];
+  for (const type of Object.keys(ADAPTERS)) {
+    const def = { instanceId: type, type, name: META[type].name, baseDir: null, hideIfMissing: !!META[type].experimental };
+    if (type === 'workbuddy') {
+      // WorkBuddy 国内版（~/.workbuddy）与国际版（~/.workbuddy-ai）是两套独立安装：
+      // 拆成两个内置实例，各锁各的目录，绝不互相回退混扫
+      def.name = 'WorkBuddy（国内版）';
+      def.baseDir = path.join(HOME, '.workbuddy');
+    }
+    defs.push(def);
+  }
+  defs.push({
+    instanceId: WORKBUDDY_INTL, type: 'workbuddy', name: 'WorkBuddy AI（国际版）',
+    baseDir: path.join(HOME, '.workbuddy-ai'), hideIfMissing: true,
+  });
+  return defs;
+}
+
 function loadInstances() {
   const cfg = config();
   const out = [];
-  for (const type of Object.keys(ADAPTERS)) {
-    if (cfg.agents?.[type]?.enabled === false) continue;
-    const inst = { instanceId: type, type, name: META[type].name, baseDir: null, builtin: true };
-    // 实验性适配器：本机未检测到存储时不占主界面（可在设置页手动添加数据目录）
-    if (META[type].experimental && !ADAPTERS[type].doctor(inst.baseDir).ok) continue;
+  for (const def of builtinDefs()) {
+    if (cfg.agents?.[def.instanceId]?.enabled === false) continue;
+    const inst = { instanceId: def.instanceId, type: def.type, name: def.name, baseDir: def.baseDir, builtin: true };
+    // 未检测到存储时不占主界面（可在设置页手动添加数据目录）
+    if (def.hideIfMissing && !ADAPTERS[def.type].doctor(inst.baseDir).ok) continue;
     out.push(inst);
   }
   for (const c of cfg.customAgents || []) {
@@ -173,18 +195,18 @@ function instancesForSettings() {
   const counts = new Map(listInstances().map((i) => [i.instanceId || i.id, i.sessionCount || 0]));
   const cfg = config();
   const out = [];
-  for (const type of Object.keys(ADAPTERS)) {
-    const inst = { instanceId: type, type, name: META[type].name, baseDir: null, builtin: true };
+  for (const def of builtinDefs()) {
+    const inst = { instanceId: def.instanceId, type: def.type, name: def.name, baseDir: def.baseDir, builtin: true };
     // enabled 只反映用户设置（未设置 = 启用）；"未安装"与"已停用"是两回事
-    const enabled = cfg.agents?.[type]?.enabled !== false;
+    const enabled = cfg.agents?.[def.instanceId]?.enabled !== false;
     let probe = { ok: false, storage: null };
-    try { probe = ADAPTERS[type].doctor(inst.baseDir); } catch { }
+    try { probe = ADAPTERS[def.type].doctor(inst.baseDir); } catch { }
     out.push({
-      ...inst, enabled, available: enabled && probe.ok, storage: probe.storage || null, sessionCount: counts.get(type) || 0,
+      ...inst, enabled, available: enabled && probe.ok, storage: probe.storage || null, sessionCount: counts.get(def.instanceId) || 0,
       // 能力单一事实源：设置页同样携带 cap/experimental
-      cap: (META[type] && META[type].cap) || { t0: 0, t1: 0 },
-      experimental: !!(META[type] && META[type].experimental),
-      note: META[type] && META[type].note,
+      cap: (META[def.type] && META[def.type].cap) || { t0: 0, t1: 0 },
+      experimental: !!(META[def.type] && META[def.type].experimental),
+      note: META[def.type] && META[def.type].note,
     });
   }
   for (const inst of loadInstances()) {
@@ -202,12 +224,15 @@ function instancesForSettings() {
 }
 
 // ---- 管理：启用/停用 + 自定义实例 ----
+// type 可以是 agent 类型（claude…）或内置实例 id（workbuddy-intl 等双版本实例）
 function setTypeEnabled(type, enabled) {
-  if (!META[type]) throw new Error('未知 agent 类型: ' + type);
+  const isBuiltinInst = builtinDefs().some((d) => d.instanceId === type);
+  if (!META[type] && !isBuiltinInst) throw new Error('未知 agent 类型: ' + type);
   const cfg = config();
   const agents = { ...(cfg.agents || {}) };
   agents[type] = { ...agents[type], enabled: !!enabled };
   saveConfig({ agents });
+  bustListCache();
   return { type, enabled: !!enabled };
 }
 

@@ -11,7 +11,12 @@ const workbuddy = require('../server/core/workbuddy');
 const { entryPreview } = require('../server/core/msx');
 
 const SANDBOX = path.join(__dirname, '..', 'sandbox');
-fs.rmSync(SANDBOX, { recursive: true, force: true });
+// cihome/ 是 ci-test.js 的隔离 HOME 夹具（CI 的 mcp-verify 步骤还要复用），清理时保留
+if (fs.existsSync(SANDBOX)) {
+  for (const e of fs.readdirSync(SANDBOX)) {
+    if (e !== 'cihome') fs.rmSync(path.join(SANDBOX, e), { recursive: true, force: true });
+  }
+}
 fs.mkdirSync(SANDBOX, { recursive: true });
 const projA = path.join(SANDBOX, 'projA');
 fs.mkdirSync(projA, { recursive: true });
@@ -52,9 +57,14 @@ const nowIso = () => new Date().toISOString();
   const zcodeMsx = await zcode.readSession(zcodeSess.id);
   console.log(`  zcode: ${zcodeSess.title} → entries=${zcodeMsx.stats.entries} user=${zcodeMsx.stats.userTurns} tools=${zcodeMsx.stats.toolCalls} thinking=${zcodeMsx.stats.thinking}`);
 
-  const wbList = workbuddy.listSessions();
+  // WorkBuddy 双版本：优先本机实际存在的那一版（国内 ~/.workbuddy / 国际 ~/.workbuddy-ai）
+  const wbDomestic = path.join(os.homedir(), '.workbuddy');
+  const wbIntl = path.join(os.homedir(), '.workbuddy-ai');
+  const wbBase = fs.existsSync(path.join(wbDomestic, 'workbuddy.db')) ? wbDomestic
+    : (fs.existsSync(path.join(wbIntl, 'workbuddy.db')) ? wbIntl : null);
+  const wbList = workbuddy.listSessions(wbBase);
   const wbSess = pick(wbList, (s) => s.file && s.size > 100000 && s.size < 5000000, 'workbuddy 中等会话');
-  const wbMsx = await workbuddy.readSession(wbSess.id);
+  const wbMsx = await workbuddy.readSession(wbSess.id, wbBase);
   console.log(`  workbuddy: ${wbSess.title} → entries=${wbMsx.stats.entries} user=${wbMsx.stats.userTurns} tools=${wbMsx.stats.toolCalls} thinking=${wbMsx.stats.thinking}`);
 
   // ---------- writers（沙盒） ----------
@@ -95,7 +105,7 @@ const nowIso = () => new Date().toISOString();
 
   // codex → workbuddy（db 副本 + projects 沙盒）
   const wcopy = path.join(SANDBOX, 'workbuddy-copy.db');
-  fs.copyFileSync(workbuddy.dbPath(), wcopy);
+  fs.copyFileSync(workbuddy.dbPath(wbBase), wcopy);
   const r4 = workbuddy.writeSession(codexMsx, { cwd: projA, dbFile: wcopy, projectsDir: path.join(SANDBOX, 'wb-projects') });
   const back4 = await workbuddy.readSession(r4.path);
   console.log(`  codex→workbuddy(副本): lines=${r4.count} 回读entries=${back4.stats.entries} user=${back4.stats.userTurns}`);

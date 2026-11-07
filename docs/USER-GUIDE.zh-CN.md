@@ -41,6 +41,7 @@ node server/index.js                          # 或双击 StartAgentRelay.bat
 
 - **预览内搜索** — 预览上方的搜索框会高亮命中并显示本屏命中数。
 - **勾选条目** — 每条带复选框，也可用选择栏的全选/全不选。勾了什么，接力就带什么。
+- **导出** — **导出 MD** 把会话渲染成逐字 Markdown 转写（选择与脱敏照常生效；工具调用与思考块渲染为围栏/可折叠区块）；**导出 ARX** 写出结构化 JSON 中间格式，供备份或日后重新装回。
 - **微调选择** — 预览上方的选择栏集中了所有开关：是否携带思考块 / 工具结果 / 系统注入、密钥脱敏、起始条目偏移、工具输出截断（KB）、token 上限（**1M / 512K / 200K** 预设），以及**从最近压缩点开始**——从源 agent 最新的压缩边界接力，目标收到的正是源 agent 脑中还记着的部分。
 - **查看子代理会话** — 产生了子代理的会话（目前是 ZCode）会在父会话头部折叠展示，点开即可阅读，条目过多时框内可滚动。
 
@@ -117,7 +118,7 @@ node cli.js import-bundle out.arxbundle --to codex --remap "D:/work=/Users/x/wor
 
 ## 9. 设置
 
-- **Agent 实例** — 内置 agent 可逐个启停。*添加实例*可为同类型 agent 登记额外的存储位置（比如两个 Claude 配置目录），填显示名和数据目录；*检测*按钮先验证路径再加。
+- **Agent 实例** — 内置 agent 可逐个启停。WorkBuddy 出厂即两张卡：**国内版**（`~/.workbuddy`）与**国际版**（`~/.workbuddy-ai`），各自锁定目录、绝不混扫。*添加实例*可为同类型 agent 登记额外的存储位置（比如两个 Claude 配置目录），填显示名和数据目录；*检测*按钮先验证路径再加。
 - **通用** — 语言、主题（暗色/亮色/跟随系统）、字体大小、日志级别。
 - **背景图片** — 填本地图片路径或 https 链接，即时生效且跨重启持久保存。*毛玻璃强度*滑杆控制面板在壁纸上的磨砂程度。清空输入框则回到纯色背景。
 - **数据目录** — 备份、导出、缓存、日志的存放位置。修改后新文件写入新位置，旧文件原地不动。
@@ -142,7 +143,7 @@ claude mcp add agentrelay -- node C:\path\to\agentrelay\cli.js mcp
 | `node cli.js agents` | 列出检测到的 agent 与会话数 |
 | `node cli.js list <agent> [--q 关键词]` | 列出会话（`--json`、`--verbose`） |
 | `node cli.js show <agent> <sessionId>` | 打印会话前若干条（`--limit`） |
-| `node cli.js export <agent> <sessionId>` | 按选择导出 ARX 文件（`--out`、`--from/--to`、`--no-thinking`、`--truncate`、`--budget`、`--redact`） |
+| `node cli.js export <agent> <sessionId>` | 按 ARX JSON 或 Markdown 导出（`--out`、`--format md`、`--from/--to`、`--no-thinking`、`--truncate`、`--budget`、`--redact`） |
 | `node cli.js load <file.arx.json> --into <agent> --cwd <路径>` | 把先前导出的 ARX 文件装回 agent（`--mode`、`--dry-run`） |
 | `node cli.js transfer --from <agent>:<id> --to <agent>` | 一次性接力（`--cwd`、`--mode T0/T1/T2`、`--dry-run`） |
 | `node cli.js bundle <out> --from <agent>:<id> [...]` | 跨设备打包多个会话（`--redact`） |

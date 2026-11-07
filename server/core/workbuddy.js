@@ -1,6 +1,7 @@
 'use strict';
 // WorkBuddy（腾讯/CodeBuddy 系）适配器
-// 数据: ~/.workbuddy-ai/workbuddy.db（sessions 元数据） + ~/.workbuddy-ai/projects/<slug>/<sessionId>.jsonl（对话）
+// 国内版: ~/.workbuddy/workbuddy.db + ~/.workbuddy/projects/<slug>/<sessionId>.jsonl
+// 国际版: ~/.workbuddy-ai/…（同构不同目录；agents.js 注册为独立实例，绝不混用）
 // 格式: {id,parentId,timestamp(ms),type:'message'|'function_call'|'function_call_result'|'reasoning'|'ai-title'|'session-meta',...}
 const fs = require('fs');
 const path = require('path');
@@ -10,8 +11,9 @@ const {
   truncateStr, safeParse, streamJsonl, writeJsonl,
 } = require('./util');
 
-// baseDir = 用户自定义数据目录（.workbuddy-ai 目录）；null = 默认 ~/.workbuddy-ai
-const dataHome = (baseDir) => baseDir || path.join(HOME, '.workbuddy-ai');
+// baseDir = 数据目录（.workbuddy 或 .workbuddy-ai）；null = 默认 ~/.workbuddy（国内版）。
+// 内置实例始终显式传 baseDir（agents.js），此默认仅为兼容旧调用。
+const dataHome = (baseDir) => baseDir || path.join(HOME, '.workbuddy');
 const dbPath = (baseDir) => path.join(dataHome(baseDir), 'workbuddy.db');
 const projectsRoot = (baseDir) => path.join(dataHome(baseDir), 'projects');
 
@@ -19,8 +21,9 @@ const ENV_PREFIXES = ['<system-reminder', '<user_info>', '<identity_context', '<
 function isEnvText(t) { return typeof t === 'string' && ENV_PREFIXES.some((p) => t.startsWith(p)); }
 
 // workbuddy.db 很小（<1MB），复制后读取避免锁
-function openDb(dbFile) {
-  const src = dbFile || dbPath();
+// baseDir 必须透传：国内/国际双实例各自开各自的库，绝不能落到默认目录（否则国际版读到国内会话）
+function openDb(dbFile, baseDir) {
+  const src = dbFile || dbPath(baseDir);
   if (dbFile) return new DatabaseSync(dbFile);
   ensureDir(cacheDir());
   const dest = path.join(cacheDir(), 'workbuddy-read-copy.db');
@@ -46,7 +49,7 @@ function findSessionFile(sessionId, baseDir) {
 
 function listSessions(baseDir) {
   if (!fs.existsSync(dbPath(baseDir))) return [];
-  const db = openDb();
+  const db = openDb(null, baseDir);
   try {
     const rows = db.prepare(`
       SELECT s.id, s.cwd, s.title, s.custom_title, s.status, s.created_at, s.updated_at, s.last_activity_at,

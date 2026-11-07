@@ -6,7 +6,7 @@
 
 **把一个 AI agent 做到一半的会话，整个搬给另一个 agent——搬的是会话本身，不是摘要。**
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE) [![Node](https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org) [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg?style=flat-square)](#快速开始) [![npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-success.svg?style=flat-square)](#快速开始)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE) [![CI](https://github.com/DavidLi-TJ/AgentRelay/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidLi-TJ/AgentRelay/actions/workflows/ci.yml) [![Node](https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org) [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg?style=flat-square)](#快速开始) [![npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-success.svg?style=flat-square)](#快速开始)
 
 [English](README.md) ｜ 简体中文 · [用户指南](docs/USER-GUIDE.zh-CN.md) · [快速开始](#快速开始) · [支持矩阵](#支持矩阵) · [接力级别](#三种接力方式) · [FAQ](#faq)
 
@@ -87,7 +87,8 @@ npx github:DavidLi-TJ/AgentRelay serve  # 一条命令，然后打开 http://127
 | Claude Code | `~/.claude/projects/` | ✓ | T0 / T1 / T2 | `claude --resume` |
 | Codex CLI | `~/.codex/sessions/` + `state_5.sqlite` | ✓ | T0 / T1 / T2 | `codex resume` |
 | ZCode | `~/.zcode/cli/db/db.sqlite` | ✓ | T0 / T1 / T2 | 桌面端会话列表 |
-| WorkBuddy | `~/.workbuddy-ai/workbuddy.db` | ✓ | T1 / T2 | 桌面端会话列表 |
+| WorkBuddy（国内版） | `~/.workbuddy/workbuddy.db` | ✓ | T1 / T2 | 桌面端会话列表 |
+| WorkBuddy AI（国际版） | `~/.workbuddy-ai/workbuddy.db` | ✓ | T1 / T2 | 桌面端会话列表 |
 | OpenCode | `~/.local/share/opencode/opencode.db` | ✓ | T1 / T2 | 会话列表 |
 | DeepSeek Harness | `~/.dsh/sessions/`（zstd 多帧） | ✓ | T0 / T1 / T2 | 会话列表 |
 | Gemini CLI（实验性） | `~/.gemini/tmp/*/chats/` | ✓ | T0 / T1 / T2 | `gemini` `/resume` |
@@ -95,7 +96,7 @@ npx github:DavidLi-TJ/AgentRelay serve  # 一条命令，然后打开 http://127
 | VS Code Copilot（实验性） | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T0 / T1 / T2 | Chat History |
 | Cursor（实验性） | `globalStorage/state.vscdb`（`composerData`/`bubbleId` + `composerHeaders`） | ✓ | T1 / T2 | Chat History |
 
-实验性适配器基于官方源码 schema 实现（Cursor 无导入 API，schema 来自社区逆向）并通过合成样本测试。注意：VS Code 不持久化工具输出，接力后的会话该处为占位；Cursor T1 写入时要求 Cursor 完全退出（退出时的内存态可能覆盖外部写入），写入前会快照工作区数据库；DeepSeek Harness 的 T0/T1 需要 Node ≥ 23.8 的内置 zstd（低版本界面会自动降级为 T2）。同一个 agent 可以在设置页添加多个实例（比如两个 Claude 配置目录）。
+实验性适配器基于官方源码 schema 实现（Cursor 无导入 API，schema 来自社区逆向）并通过合成样本测试。注意：WorkBuddy 的国内版与国际版是两套独立安装，作为两张独立卡片出现，各自锁定 `~/.workbuddy` 与 `~/.workbuddy-ai`，绝不互相混扫；VS Code 不持久化工具输出，接力后的会话该处为占位；Cursor T1 写入时要求 Cursor 完全退出（退出时的内存态可能覆盖外部写入），写入前会快照工作区数据库；DeepSeek Harness 的 T0/T1 需要 Node ≥ 23.8 的内置 zstd（低版本界面会自动降级为 T2）。同一个 agent 可以在设置页添加多个实例（比如两个 Claude 配置目录）。
 
 ## 与同类工具的对比
 
@@ -111,7 +112,7 @@ npx github:DavidLi-TJ/AgentRelay serve  # 一条命令，然后打开 http://127
 
 ## 编辑上下文、会话查重、子会话
 
-会话会跑偏：agent 循环输出"let me do it"式废话、工具结果污染上下文、一步走错步步错。详情页提供**编辑模式**：按关键词过滤条目、改写或删除条目、插入新内容（用户消息 / 助手回复 / 工具调用对，或粘贴从其他 agent 导出的 ARX 片段批量合并）、逐条复制原文。保存有两种方式：**就地保存**（claude 与 zcode——写回该会话自己的存储，写前自动备份，agent 下次打开该会话时生效）或**另存为新会话**（全部 agent 支持，原会话不动）。编辑是你显式发起的操作——接力仍然绝不修改源会话。
+会话会跑偏：agent 循环输出"let me do it"式废话、工具结果污染上下文、一步走错步步错。详情页提供**编辑模式**：按关键词过滤条目、改写或删除条目、插入新内容（用户消息 / 助手回复 / 工具调用对，或粘贴从其他 agent 导出的 ARX 片段批量合并）、逐条复制原文。保存有两种方式：**就地保存**（claude 与 zcode——写回该会话自己的存储，写前自动备份，agent 下次打开该会话时生效）或**另存为新会话**（全部 agent 支持，原会话不动）。编辑是你显式发起的操作——接力仍然绝不修改源会话。任何会话还可以一键导出为 **Markdown 逐字转写**（选择与脱敏照常生效，工具调用与思考块渲染为可折叠区块）或 ARX JSON 文件——两个按钮并排放在预览下方。
 
 三条如实说明：claude 就地保存会重新合成 transcript，格式无法往返的 sidechain/系统注入行会被丢弃（备份可还原）；编辑器能触及的是已加载的前 400 条（点**加载更多**可以继续往后）；粘贴的工具对会保持相邻——`tool_result` 离 `tool_use` 太远会让 `claude --resume` 报错。
 

@@ -465,7 +465,7 @@ async function route(req, res, u) {
     }
     if (p === '/api/export') {
       const body = await readBody(req, res);
-      const { sourceAgent, sourceInstance, sessionId, options = {} } = body;
+      const { sourceAgent, sourceInstance, sessionId, options = {}, format } = body;
       if ((!sourceAgent && !sourceInstance) || !sessionId) return send(res, 400, { error: 'sourceAgent/sourceInstance 与 sessionId 必填' });
       const src = sourceInstance ? await agents.readMsxInstance(sourceInstance, sessionId) : await agents.readMsx(sourceAgent, sessionId);
       const loss = [];
@@ -476,7 +476,17 @@ async function route(req, res, u) {
       msx.stats = computeStats(msx.entries);
       const { exportsDir, ensureDir } = require('./core/util');
       const dir = ensureDir(exportsDir());
-      const name = `${sourceAgent}-${String(msx.source.session_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8)}-${Date.now()}.arx.json`;
+      const idPart = String(msx.source.session_id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8);
+      const srcAgent = sourceInstance ? ((agents.getInstance(sourceInstance) || {}).type || sourceAgent) : sourceAgent;
+      if (format === 'md') {
+        // Markdown 逐字导出：选择/脱敏照常生效，渲染成可读转写
+        const { msxToMarkdown } = require('./core/markdown');
+        const file = path.join(dir, `${srcAgent}-${idPart}-${Date.now()}.md`);
+        fs.writeFileSync(file, msxToMarkdown(msx), 'utf8');
+        logger.info('export-md', { file, entries: msx.entries.length });
+        return send(res, 200, { file, entries: msx.entries.length, tokens: msx.stats.approxTokens });
+      }
+      const name = `${srcAgent}-${idPart}-${Date.now()}.arx.json`;
       const file = path.join(dir, name);
       const { writeMsxFile } = require('./core/transfer');
       await writeMsxFile(msx, file);

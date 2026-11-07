@@ -95,8 +95,14 @@ async function route(cmd, args) {
     let msx = { ...src, entries, loss: [...src.loss, ...loss] };
     if (args.redact) msx = msxMod.redactMsx(msx);
     msx.stats = msxMod.computeStats(msx.entries);
-    const out = args.out || `${agent}-${String(msx.source.session_id).slice(0, 8)}.arx.json`;
-    fs.writeFileSync(out, JSON.stringify(msx, null, 2), 'utf8');
+    const asMd = String(args.format || '').toLowerCase() === 'md' || args.markdown;
+    const out = args.out || `${agent}-${String(msx.source.session_id).slice(0, 8)}${asMd ? '.md' : '.arx.json'}`;
+    if (asMd) {
+      const { msxToMarkdown } = require('./server/core/markdown');
+      fs.writeFileSync(out, msxToMarkdown(msx), 'utf8');
+    } else {
+      fs.writeFileSync(out, JSON.stringify(msx, null, 2), 'utf8');
+    }
     console.log(`已导出 ${msx.entries.length} 条 → ${path.resolve(out)} (~${msx.stats.approxTokens} tokens)`);
     if (msx.loss.length) console.log(`转换说明:\n  - ${[...new Set(msx.loss)].join('\n  - ')}`);
   } else if (cmd === 'load') {
@@ -162,7 +168,7 @@ async function route(cmd, args) {
   node cli.js agents                          列出检测到的 agent
   node cli.js list <agent> [--q 关键词]        列出会话 (agent: claude|codex|zcode)
   node cli.js show <agent> <sessionId>        查看会话内容
-  node cli.js export <agent> <sessionId> [--out 文件] [--from N --to N] [--no-thinking]
+  node cli.js export <agent> <sessionId> [--out 文件] [--format md] [--from N --to N] [--no-thinking]
                                               [--truncate KB] [--budget tokens] [--redact]
   node cli.js load <file.arx.json>（兼容读取旧 .msx.json） --into claude|codex|zcode --cwd <项目路径> [--mode T1|T2] [--dry-run]
   node cli.js transfer --from <agent>:<sessionId> --to <agent> --cwd <路径> [--mode T0|T1|T2] [--dry-run]

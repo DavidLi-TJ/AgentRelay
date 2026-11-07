@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 24
+          - os: windows-latest
+            node: 24
+          - os: ubuntu-latest
+            node: 22 # 最低支持线：node:sqlite 可用；DSH 原生写入（zstd ≥23.8）自动跳过
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # 全链路冒烟：假 HOME 隔离，不依赖机器上装了任何真实 agent
+      - name: Core pipeline (isolated fake HOME)
+        run: node scripts/ci-test.js
+      # MCP 端到端：复用上一步生成的夹具（claude 会话已落 fake HOME）
+      - name: MCP end-to-end (same fixtures)
+        run: node scripts/mcp-verify.js
+        env:
+          HOME: ${{ github.workspace }}/sandbox/cihome
+          USERPROFILE: ${{ github.workspace }}/sandbox/cihome

@@ -26,7 +26,7 @@
     '用户': 'User', '助手': 'Assistant', '系统': 'System',
     '统计中…': 'Computing…',
     '接力到其他 Agent →': 'Relay to agents →',
-    '导出 ARX': 'Export ARX',
+    '导出 ARX': 'Export ARX', '导出 MD': 'Export MD',
     '显示更多': 'Show more',
     // 接力向导
     '会话接力': 'Session relay',
@@ -315,7 +315,7 @@
     '，只记录严重错误；接力、备份等一般活动需要到设置页把日志级别调到 info 或以上才会记录。': ' — severe errors only. Relays and backups get recorded once you raise the level to info or above in Settings.',
     '。执行一次接力或备份后，这里会出现对应记录。': '. Run a relay or backup and entries will show up here.',
     '备份根目录': 'Backup root',
-    '导出 ARX': 'Export ARX',
+    '导出 ARX': 'Export ARX', '导出 MD': 'Export MD',
     '接力参数': 'Relay options',
     '起点': 'From',
     '上限': 'Cap',

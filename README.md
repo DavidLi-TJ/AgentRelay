@@ -6,7 +6,7 @@
 
 **Move a half-finished coding session from one AI agent to another — the whole session, not a summary of it.**
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE) [![Node](https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org) [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg?style=flat-square)](#quick-start) [![npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-success.svg?style=flat-square)](#quick-start)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE) [![CI](https://github.com/DavidLi-TJ/AgentRelay/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidLi-TJ/AgentRelay/actions/workflows/ci.yml) [![Node](https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org) [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg?style=flat-square)](#quick-start) [![npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-success.svg?style=flat-square)](#quick-start)
 
 English ｜ [简体中文](README.zh-CN.md) · [User guide](docs/USER-GUIDE.md) · [Quick start](#quick-start) · [Support matrix](#support-matrix) · [Relay tiers](#three-ways-to-relay) · [FAQ](#faq)
 
@@ -91,7 +91,8 @@ Sessions live on one machine, but work moves. Export selected sessions (or a who
 | Claude Code | `~/.claude/projects/` | ✓ | T0 / T1 / T2 | `claude --resume` |
 | Codex CLI | `~/.codex/sessions/` + `state_5.sqlite` | ✓ | T0 / T1 / T2 | `codex resume` |
 | ZCode | `~/.zcode/cli/db/db.sqlite` | ✓ | T0 / T1 / T2 | Desktop session list |
-| WorkBuddy | `~/.workbuddy-ai/workbuddy.db` | ✓ | T1 / T2 | Desktop session list |
+| WorkBuddy（国内版）| `~/.workbuddy/workbuddy.db` | ✓ | T1 / T2 | Desktop session list |
+| WorkBuddy AI（国际版）| `~/.workbuddy-ai/workbuddy.db` | ✓ | T1 / T2 | Desktop session list |
 | OpenCode | `~/.local/share/opencode/opencode.db` | ✓ | T1 / T2 | Session list |
 | DeepSeek Harness | `~/.dsh/sessions/` (multi-frame zstd) | ✓ | T0 / T1 / T2 | Session list |
 | Gemini CLI (experimental) | `~/.gemini/tmp/*/chats/` | ✓ | T0 / T1 / T2 | `gemini` `/resume` |
@@ -99,7 +100,7 @@ Sessions live on one machine, but work moves. Export selected sessions (or a who
 | VS Code Copilot (experimental) | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T0 / T1 / T2 | Chat History |
 | Cursor (experimental) | `globalStorage/state.vscdb` (`composerData`/`bubbleId` + `composerHeaders`) | ✓ | T1 / T2 | Chat History |
 
-Experimental adapters are implemented from official source schemas (Cursor's from community reverse-engineering, since no import API exists) and pass synthetic-sample tests. Notes: VS Code does not persist tool outputs — relayed sessions carry a placeholder there; Cursor T1 requires Cursor to be fully closed while writing (its in-memory state can overwrite external edits on exit) and takes a workspace-database snapshot first; DeepSeek Harness as a native target needs the zstd built into Node ≥ 23.8 (older Nodes are auto-downgraded to T2 in the UI). Trae stays on hold: its agent database is SQLCipher-encrypted with the key generated inside Trae's own backend (a T2 relay into a Trae project still works). Several instances of the same agent (say, two Claude config directories) can be added in Settings.
+Experimental adapters are implemented from official source schemas (Cursor's from community reverse-engineering, since no import API exists) and pass synthetic-sample tests. Notes: the two WorkBuddy editions are separate installs and appear as separate cards — domestic reads/writes only `~/.workbuddy`, international only `~/.workbuddy-ai`, never mixed; VS Code does not persist tool outputs — relayed sessions carry a placeholder there; Cursor T1 requires Cursor to be fully closed while writing (its in-memory state can overwrite external edits on exit) and takes a workspace-database snapshot first; DeepSeek Harness as a native target needs the zstd built into Node ≥ 23.8 (older Nodes are auto-downgraded to T2 in the UI). Trae stays on hold: its agent database is SQLCipher-encrypted with the key generated inside Trae's own backend (a T2 relay into a Trae project still works). Several instances of the same agent (say, two Claude config directories) can be added in Settings.
 
 ## How it compares
 
@@ -115,7 +116,7 @@ Experimental adapters are implemented from official source schemas (Cursor's fro
 
 ## Edit context, find duplicates, browse sub-sessions
 
-Agent sessions drift. An agent loops on "let me do it", a tool result pollutes the context, a wrong turn poisons everything after it. The detail page has an **Edit** mode for that: filter entries by keyword, rewrite or remove entries, insert new ones (user / assistant / a tool-call pair, or paste an exported ARX fragment from another agent to batch-merge), and copy any entry verbatim. Saving offers two modes: **save in place** (claude and zcode — writes the session's own storage, auto-backup first, takes effect the next time that agent opens the session) or **save as a new session** (every agent, original untouched). Editing is your explicit action — relays still never modify a source session.
+Agent sessions drift. An agent loops on "let me do it", a tool result pollutes the context, a wrong turn poisons everything after it. The detail page has an **Edit** mode for that: filter entries by keyword, rewrite or remove entries, insert new ones (user / assistant / a tool-call pair, or paste an exported ARX fragment from another agent to batch-merge), and copy any entry verbatim. Saving offers two modes: **save in place** (claude and zcode — writes the session's own storage, auto-backup first, takes effect the next time that agent opens the session) or **save as a new session** (every agent, original untouched). Editing is your explicit action — relays still never modify a source session. Any session can also be exported as a **verbatim Markdown transcript** (your selection and redaction apply, tool calls and thinking render as collapsible blocks) or as an ARX JSON file — the two buttons sit side by side under the preview.
 
 Three honest caveats: an in-place claude save re-synthesizes the transcript, so sidechain/system-injection lines that the format cannot round-trip are dropped (the backup is the recovery); the editor reaches the first 400 loaded entries (click **Load more** to bring further ones in); and a pasted tool pair is kept adjacent for exactly this reason — a `tool_result` far from its `tool_use` makes `claude --resume` fail.
 
