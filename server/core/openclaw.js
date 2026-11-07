@@ -1,7 +1,7 @@
 'use strict';
-// OpenClaw 适配器 —— 🧪 实验性（格式与 Pi 同构，来源 cc-switch openclaw.rs；本机未安装）
-// baseDir = 自定义目录；null = 默认 ~/.openclaw/agents/<agent>/sessions/*.jsonl
-// 会话为顺序 JSONL（无树形分支）；网关会在文本尾注入 "\n[message_id: ...]"，需剥除
+// OpenClaw 适配器 —— 已在真实客户端上验证（格式与 Pi v3 同构：OpenClaw 本身基于 pi）
+// baseDir = 自定义目录；null = 默认 ~/.openclaw/agents/<agent>/sessions/*.jsonl（伴随 *.trajectory.jsonl 轨迹文件，非会话）
+// 网关会在文本尾注入 "\n[message_id: ...]"，需剥除
 const fs = require('fs');
 const path = require('path');
 const { HOME, nowISO, truncateStr, safeParse } = require('./util');
@@ -43,7 +43,7 @@ function listSessions(baseDir) {
     const sessDir = path.join(root, agentDir, 'sessions');
     if (!fs.existsSync(sessDir)) continue;
     for (const f of fs.readdirSync(sessDir)) {
-      if (!f.endsWith('.jsonl')) continue;
+      if (!f.endsWith('.jsonl') || f.endsWith('.trajectory.jsonl')) continue;
       try {
         const records = parseJsonl(path.join(sessDir, f));
         const first = records[0] || {};
@@ -69,13 +69,21 @@ async function readSession(sessionId, baseDir) {
   }
   if (!target) throw new Error(`OpenClaw 会话不存在: ${sessionId}`);
   const records = parseJsonl(target);
-  // 项目路径：首行携带（写入端约定），补进 ARX —— 否则 bundle 导出没有 cwd、跨设备重映射无从谈起
+  // 项目路径：session header 行携带（Pi v3 同构），补进 ARX —— 否则 bundle 导出没有 cwd、跨设备重映射无从谈起
   const firstCwd = records[0] && records[0].cwd ? String(records[0].cwd) : null;
   const entries = [];
   const compactions = [];
   const loss = [];
+  const env = { model: null, provider: null, cli_version: null };
+  let recordedTokens = 0;
   for (const e of records) {
-    if (e.type !== 'message') { loss.push(`OpenClaw: 跳过 ${e.type} 条目`); continue; }
+    if (e.type !== 'message') {
+      if (e.type === 'session') { /* 元数据行：cwd/ts 已在上方提取，静默吸收 */ }
+      else if (e.type === 'model_change') { if (!env.model && (e.modelId || e.model)) { env.model = e.modelId || e.model; env.provider = e.provider || null; } }
+      else if (e.type === 'thinking_level_change') { /* 格式内部状态行，无需呈现 */ }
+      else loss.push(`OpenClaw: 跳过 ${e.type} 条目`);
+      continue;
+    }
     const m = e.message || {};
     const ts = e.timestamp || null;
     if (m.role === 'user') {
@@ -84,12 +92,14 @@ async function readSession(sessionId, baseDir) {
     } else if (m.role === 'assistant') {
       const blocks = blocksFromContent(m.content);
       if (blocks.length) entries.push({ id: e.id || 'e' + entries.length, ts, role: 'assistant', kind: 'text', blocks, meta: { model: m.model || null } });
+      if (!env.model && m.model) env.model = m.model;
+      if (m.usage && typeof m.usage === 'object') recordedTokens += (m.usage.input || 0) + (m.usage.output || 0) || (m.usage.totalTokens || 0);
     } else if (m.role === 'toolResult') {
       const c = typeof m.content === 'string' ? m.content : (m.content || []).map((b) => b.text || '').join('');
       entries.push({ id: e.id || 'e' + entries.length, ts, role: 'user', kind: 'tool-result', blocks: [{ type: 'tool_result', for: m.toolCallId || 'call', output: c, isError: !!m.isError }], meta: {} });
     }
   }
-  const stats = { entries: entries.length, userTurns: 0, assistantEntries: 0, toolCalls: 0, toolResults: 0, thinking: 0, approxTokens: 0, recordedTokens: null };
+  const stats = { entries: entries.length, userTurns: 0, assistantEntries: 0, toolCalls: 0, toolResults: 0, thinking: 0, approxTokens: 0, recordedTokens };
   for (const e of entries) {
     if (e.role === 'user' && e.kind === 'text') stats.userTurns++;
     if (e.role === 'assistant') stats.assistantEntries++;
@@ -103,7 +113,7 @@ async function readSession(sessionId, baseDir) {
   return {
     arx: 1, id: require('crypto').randomUUID(), created_at: nowISO(),
     source: { agent: 'openclaw', agent_version: null, session_id: sessionId, title: truncateStr(((entries.find((e) => e.role === 'user' && e.kind === 'text') || { blocks: [{ text: '(无标题)' }] }).blocks[0].text || '').slice(0, 60), 60), file: target },
-    project: { cwd: firstCwd }, env: { model: null, provider: null, cli_version: null },
+    project: { cwd: firstCwd }, env,
     stats, entries, compactions, loss: [...new Set(loss)],
     _fileStat: { size: fs.statSync(target).size, mtimeMs: fs.statSync(target).mtimeMs },
   };
@@ -134,11 +144,15 @@ function pickAgentDir(baseDir) {
   return best || 'main';
 }
 
-// ARX 条目 → OpenClaw 顺序 JSONL（与 Pi 同构：text/thinking/toolCall 块 + toolResult role）
+// ARX 条目 → OpenClaw message 行（Pi v3 同构：线性 parentId 链；text/thinking/toolCall 块 + toolResult role）
 function openclawRecordsFrom(entries, loss) {
   const out = [];
+  let prev = null;
   let imageLoss = false, metaSeen = false;
-  const pushMsg = (id, ts, message) => out.push({ type: 'message', id, timestamp: ts, message });
+  const pushMsg = (id, ts, message) => {
+    out.push({ type: 'message', id, parentId: prev, timestamp: ts, message });
+    prev = id;
+  };
   for (const e of entries) {
     const ts = e.ts || new Date().toISOString();
     for (const b of e.blocks || []) if (b.type === 'image') imageLoss = true; // 用户/助手/元条目里的图片都记损
@@ -175,7 +189,8 @@ function openclawRecordsFrom(entries, loss) {
   return out;
 }
 
-// T1：写 <agents>/<agent>/sessions/<id>.jsonl；首行 message 携带 id/cwd/timestamp（读取端以首行 id 为会话 id）
+// T1：写 <agents>/<agent>/sessions/<id>.jsonl（Pi v3 同构）：首行 session header（id/cwd/version），
+// 其后 message 行带 parentId 线性链——真实 OpenClaw 的加载器按此结构解析
 async function writeSession(msx, { cwd, baseDir, agentDir } = {}) {
   const loss = [...(msx.loss || [])]; // 继承上游（编辑器/读取器）已记录的说明
   const entries = msx.entries || [];
@@ -185,20 +200,9 @@ async function writeSession(msx, { cwd, baseDir, agentDir } = {}) {
   const sdir = ensureDir(path.join(baseDir || AGENTS_DIR(), agentDir || pickAgentDir(baseDir), 'sessions'));
   const file = path.join(sdir, `${newId}.jsonl`);
   const records = openclawRecordsFrom(entries, loss);
-  // 首行携带会话元数据（读取端取首行 id 为会话 id、首行 cwd 为项目路径）。
-  // 仅当首条记录本身是用户消息时复用它（保持逐字顺序）；否则插入一条导入标记，不挪动原顺序。
-  const head = records[0] && records[0].message && records[0].message.role === 'user' ? records[0] : null;
-  const metaLine = head || {
-    type: 'message', id: newId, timestamp: new Date().toISOString(),
-    message: { role: 'user', content: `[AgentRelay] 导入会话 ${(msx.source && msx.source.title) || ''}`.trim() },
-  };
-  if (!head) loss.push('OpenClaw: 首条不是用户消息，已插入一条导入标记行（读取端以首行 id 为会话 id）');
-  metaLine.id = newId;
-  metaLine.cwd = projCwd;
-  if (!metaLine.timestamp) metaLine.timestamp = new Date().toISOString();
   const w = openJsonlWriter(file);
-  w.write(metaLine);
-  for (const r of records) { if (r !== head) w.write(r); }
+  w.write({ type: 'session', version: 3, id: newId, timestamp: new Date().toISOString(), cwd: projCwd });
+  for (const r of records) w.write(r);
   await w.close();
   return {
     id: newId, path: file, count: records.length, loss,

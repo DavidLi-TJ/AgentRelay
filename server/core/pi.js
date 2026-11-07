@@ -1,5 +1,5 @@
 'use strict';
-// Pi 适配器（earendil-works/pi，开源）—— 🧪 实验性（schema 来自官方 session-format.md，本机无会话数据）
+// Pi 适配器（earendil-works/pi，开源）—— 已在真实客户端上验证（one-shot 会话读写往返）
 // baseDir = 自定义目录；null = 默认 ~/.pi/agent/sessions/<编码cwd>/<ts>_<id>.jsonl
 // JSONL 树形：行1 {type:'session',version,id,timestamp,cwd}；条目 {type:'message'|..., id(8hex), parentId, timestamp}
 // message: {message:{role: user|assistant|toolResult|..., content: 串|[blocks], ...}}；块: text/image/thinking/toolCall
@@ -98,10 +98,14 @@ async function readSession(sessionId, baseDir) {
   const loss = [];
   const msxEntries = [];
   const compactions = [];
+  const env = { model: null, provider: null, cli_version: null };
+  let recordedTokens = 0;
   for (const e of branch) {
     if (e.type !== 'message') {
       if (e.type === 'compaction') compactions.push({ ts: e.timestamp, message: e.summary || '' });
       else if (e.type === 'compactionSummary' || e.type === 'branchSummary') compactions.push({ ts: e.timestamp, message: e.summary || '' });
+      else if (e.type === 'model_change') { if (!env.model && (e.modelId || e.model)) { env.model = e.modelId || e.model; env.provider = e.provider || null; } }
+      else if (e.type === 'thinking_level_change') { /* 格式内部状态行，无需呈现 */ }
       else loss.push(`Pi: 跳过 ${e.type} 条目`);
       continue;
     }
@@ -114,6 +118,9 @@ async function readSession(sessionId, baseDir) {
     } else if (m.role === 'assistant') {
       const blocks = blocksFromContent(m.content);
       if (blocks.length) msxEntries.push({ id: e.id, ts, role: 'assistant', kind: 'text', blocks, meta: { model: m.model || (m.api ? m.api.model : null) } });
+      if (!env.model && (m.model || (m.api && m.api.model))) env.model = m.model || (m.api && m.api.model);
+      if (m.provider && !env.provider) env.provider = m.provider;
+      if (m.usage && typeof m.usage === 'object') recordedTokens += (m.usage.input || 0) + (m.usage.output || 0) || (m.usage.totalTokens || 0);
     } else if (m.role === 'toolResult') {
       const c = typeof m.content === 'string' ? m.content : (m.content || []).map((b) => b.text || '').join('');
       msxEntries.push({ id: e.id, ts, role: 'user', kind: 'tool-result', blocks: [{ type: 'tool_result', for: m.toolCallId || ('call_' + e.id), output: c, isError: !!m.isError }], meta: {} });
@@ -121,7 +128,7 @@ async function readSession(sessionId, baseDir) {
       msxEntries.push({ id: e.id, ts, role: 'assistant', kind: 'text', blocks: [{ type: 'tool_use', id: 'bash_' + e.id, name: 'bash', input: { command: m.command || '' } }], meta: {} });
     }
   }
-  const stats = { entries: msxEntries.length, userTurns: 0, assistantEntries: 0, toolCalls: 0, toolResults: 0, thinking: 0, approxTokens: 0, recordedTokens: null };
+  const stats = { entries: msxEntries.length, userTurns: 0, assistantEntries: 0, toolCalls: 0, toolResults: 0, thinking: 0, approxTokens: 0, recordedTokens };
   for (const e of msxEntries) {
     if (e.role === 'user' && e.kind === 'text') stats.userTurns++;
     if (e.role === 'assistant') stats.assistantEntries++;
@@ -136,7 +143,7 @@ async function readSession(sessionId, baseDir) {
     arx: 1, id: require('crypto').randomUUID(), created_at: nowISO(),
     source: { agent: 'pi', agent_version: String(header.version || 3), session_id: header.id || sessionId, title: truncateStr(((msxEntries.find((e) => e.role === 'user' && e.kind === 'text') || { blocks: [{ text: '(无标题)' }] }).blocks[0].text || '').slice(0, 60), 60), file: target },
     project: { cwd: header.cwd || null },
-    env: { model: null, provider: null, cli_version: null },
+    env,
     stats, entries: msxEntries, compactions, loss,
     _fileStat: { size: fs.statSync(target).size, mtimeMs: fs.statSync(target).mtimeMs },
   };
@@ -219,8 +226,10 @@ async function writeSession(msx, { cwd, baseDir } = {}) {
   };
 }
 
+// 目录编码对齐 Pi 真实行为：路径中 / \ : 换成 '-'，非 ASCII 保留，整体用 -- 前后包裹
+// （真实样例：--C--Users-<名>-...-sandbox-proj--；读取端扫描全部目录，不依赖此编码）
 function slugifyCwd(cwd) {
-  return String(cwd || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'unknown';
+  return '--' + String(cwd || 'unknown').replace(/[\/\\:]/g, '-') + '--';
 }
 
 // T0：同源原生复制（替换 header 行 id + 文件名；其余字节原样）

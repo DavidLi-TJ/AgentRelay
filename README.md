@@ -97,7 +97,7 @@ Sessions live on one machine, but work moves. Export selected sessions (or a who
 | OpenCode | `~/.local/share/opencode/opencode.db` | ✓ | T1 / T2 | Session list |
 | DeepSeek Harness | `~/.dsh/sessions/` (multi-frame zstd) | ✓ | T0 / T1 / T2 | Session list |
 | Gemini CLI (experimental) | `~/.gemini/tmp/*/chats/` | ✓ | T0 / T1 / T2 | `gemini` `/resume` |
-| Pi / OpenClaw (experimental) | JSONL | ✓ | T0 / T1 / T2 | Session list |
+| Pi / OpenClaw | JSONL (Pi v3 format) | ✓ | T0 / T1 / T2 | Session list |
 | VS Code Copilot (experimental) | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T0 / T1 / T2 | Chat History |
 | Cursor (experimental) | `globalStorage/state.vscdb` (`composerData`/`bubbleId` + `composerHeaders`) | ✓ | T1 / T2 | Chat History |
 | Doubao Work (experimental) | in-app IndexedDB + cloud (no local session store) | ✓ | T2 | task reads the transcript file |

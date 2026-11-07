@@ -93,7 +93,7 @@ npx @ldavidl/agentrelay serve  # 一条命令，然后打开 http://127.0.0.1:17
 | OpenCode | `~/.local/share/opencode/opencode.db` | ✓ | T1 / T2 | 会话列表 |
 | DeepSeek Harness | `~/.dsh/sessions/`（zstd 多帧） | ✓ | T0 / T1 / T2 | 会话列表 |
 | Gemini CLI（实验性） | `~/.gemini/tmp/*/chats/` | ✓ | T0 / T1 / T2 | `gemini` `/resume` |
-| Pi / OpenClaw（实验性） | 各自 JSONL | ✓ | T0 / T1 / T2 | 会话列表 |
+| Pi / OpenClaw | 各自 JSONL（Pi v3 格式） | ✓ | T0 / T1 / T2 | 会话列表 |
 | VS Code Copilot（实验性） | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T0 / T1 / T2 | Chat History |
 | Cursor（实验性） | `globalStorage/state.vscdb`（`composerData`/`bubbleId` + `composerHeaders`） | ✓ | T1 / T2 | Chat History |
 | 豆包工作（实验性） | 应用内 IndexedDB + 云端（无本地会话库） | ✓ | T2 | 工作任务读取转写文件 |

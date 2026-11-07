@@ -29,8 +29,8 @@ const META = {
   workbuddy: { id: 'workbuddy', name: 'WorkBuddy', vendor: 'Tencent 腾讯', color: '#3c8cff', cli: null, cap: { t0: 1, t1: 1 } },
   opencode: { id: 'opencode', name: 'OpenCode', vendor: 'sst (open source)', color: '#e8a33d', cli: 'opencode', cap: { t0: 1, t1: 1 } },
   gemini: { id: 'gemini', name: 'Gemini CLI', vendor: 'Google', color: '#4796e3', cli: 'gemini', experimental: true, cap: { t0: 1, t1: 1 } },
-  pi: { id: 'pi', name: 'Pi', vendor: 'earendil-works (open source)', color: '#c9a227', cli: 'pi', experimental: true, cap: { t0: 1, t1: 1 } },
-  openclaw: { id: 'openclaw', name: 'OpenClaw', vendor: 'open source', color: '#e05e3d', cli: null, experimental: true, cap: { t0: 1, t1: 1 } },
+  pi: { id: 'pi', name: 'Pi', vendor: 'earendil-works (open source)', color: '#c9a227', cli: 'pi', hideIfMissing: true, cap: { t0: 1, t1: 1 } },
+  openclaw: { id: 'openclaw', name: 'OpenClaw', vendor: 'open source', color: '#e05e3d', cli: null, hideIfMissing: true, cap: { t0: 1, t1: 1 } },
   dsh: { id: 'dsh', name: 'DeepSeek Harness', vendor: 'deepseek-ai (open source)', color: '#2aa8c9', cli: 'dsh', experimental: true, cap: { t0: 1, t1: 1 } },
   vscode: { id: 'vscode', name: 'VS Code Copilot', vendor: 'GitHub (open source)', color: '#8957e5', cli: null, experimental: true, cap: { t0: 1, t1: 1 } },
   cursor: { id: 'cursor', name: 'Cursor', vendor: 'Anysphere', color: '#6c7ee1', cli: 'cursor-agent', experimental: true, cap: { t0: 0, t1: 1 } },
@@ -52,7 +52,7 @@ const WORKBUDDY_INTL = 'workbuddy-intl';
 function builtinDefs() {
   const defs = [];
   for (const type of Object.keys(ADAPTERS)) {
-    const def = { instanceId: type, type, name: META[type].name, baseDir: null, hideIfMissing: !!META[type].experimental };
+    const def = { instanceId: type, type, name: META[type].name, baseDir: null, hideIfMissing: !!(META[type].experimental || META[type].hideIfMissing) };
     if (type === 'workbuddy') {
       // WorkBuddy 国内版（~/.workbuddy）与国际版（~/.workbuddy-ai）是两套独立安装：
       // 拆成两个内置实例，各锁各的目录，绝不互相回退混扫
