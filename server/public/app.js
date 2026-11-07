@@ -1,8 +1,10 @@
 'use strict';
 /* AgentRelay GUI v3 —— 实例化 agent · 惰性加载 · 接力向导 · 活动时间线 · 主题/双语 */
 
-const AGENT_COLORS = { claude: '#d97757', codex: '#10a37f', zcode: '#4f7cff', workbuddy: '#3c8cff', opencode: '#e8a33d', gemini: '#4796e3', pi: '#c9a227', openclaw: '#e05e3d', dsh: '#2aa8c9' };
-const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex CLI', zcode: 'ZCode', workbuddy: 'WorkBuddy', opencode: 'OpenCode', gemini: 'Gemini CLI', pi: 'Pi', openclaw: 'OpenClaw', dsh: 'DeepSeek Harness', vscode: 'VS Code Copilot' };
+const AGENT_COLORS = { claude: '#d97757', codex: '#10a37f', zcode: '#4f7cff', workbuddy: '#3c8cff', opencode: '#e8a33d', gemini: '#4796e3', pi: '#c9a227', openclaw: '#e05e3d', dsh: '#2aa8c9', vscode: '#8957e5', cursor: '#6c7ee1' };
+const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex CLI', zcode: 'ZCode', workbuddy: 'WorkBuddy', opencode: 'OpenCode', gemini: 'Gemini CLI', pi: 'Pi', openclaw: 'OpenClaw', dsh: 'DeepSeek Harness', vscode: 'VS Code Copilot', cursor: 'Cursor' };
+// 原生接力能力兜底表（与服务端 agents.js META.cap 同步；/api/agents 实例会带实时 cap，优先用那个）
+const AGENT_CAPS = { claude: { t0: 1, t1: 1 }, codex: { t0: 1, t1: 1 }, zcode: { t0: 1, t1: 1 }, workbuddy: { t0: 0, t1: 1 }, opencode: { t0: 0, t1: 1 }, gemini: { t0: 1, t1: 1 }, pi: { t0: 1, t1: 1 }, openclaw: { t0: 1, t1: 1 }, dsh: { t0: 1, t1: 1 }, vscode: { t0: 1, t1: 1 }, cursor: { t0: 0, t1: 1 } };
 
 const state = {
   instances: [],
@@ -13,6 +15,10 @@ const state = {
   sessions: [],
   current: null,          // { instance, agent, id, title, msx, total, hasMore, previewTruncated }
   excluded: new Set(),
+  edit: { on: false, removals: new Set(), edits: new Map(), inserts: [] }, // 上下文编辑器（删/改/插入队列）
+  ctxFilter: '',
+  renderFrom: 0,          // 预览窗口起点（每屏 400 条窗口式渲染）
+  subExpanded: new Set(), // 会话列表里展开过子会话的主会话 id
   options: {
     includeThinking: true, includeToolResults: true, includeMeta: false,
     from: 0, truncateToolOutputKB: 32, budgetTokens: 0, redact: false,
@@ -149,13 +155,62 @@ $('#search').addEventListener('keydown', (e) => {
 /* ---------------- 实例与会话（惰性） ---------------- */
 async function loadAgents(refresh = false) {
   state.instances = await api('/api/agents');
-  if (refresh) { state.sessionsByInstance = {}; state.sessionsLoaded = false; }
+  if (refresh) { state.sessionsByInstance = {}; state.sessionsLoaded = false; localStorage.removeItem('ms-sess-cache'); }
   renderRail();
   renderSessions();
   if (!state.sessionsLoaded) ensureSessions();
+  // 实例到达前若已渲染过接力页/设置页（刷新后恢复视图时序竞态），补渲染目标卡与实例表
+  const relayView = document.querySelector('#view-relay');
+  if (relayView && !relayView.classList.contains('hidden')) renderRelay();
+  const setView = document.querySelector('#view-settings');
+  if (setView && !setView.classList.contains('hidden')) {
+    try { renderInstancesTable(await api('/api/instances')); } catch { }
+  }
 }
 
+// 会话列表持久缓存：启动先用上次数据渲染（快），后台静默刷新（用户需求 #6）
+function loadSessionCache() {
+  try {
+    const raw = localStorage.getItem('ms-sess-cache');
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || !o.data || Date.now() - o.ts > 24 * 3600 * 1000) return null;
+    return o.data;
+  } catch { return null; }
+}
+function saveSessionCache() {
+  try { localStorage.setItem('ms-sess-cache', JSON.stringify({ ts: Date.now(), data: state.sessionsByInstance })); } catch { }
+}
 async function ensureSessions() {
+  // 全局自动加载开关（设置页）：关闭后启动不扫描任何 agent 的会话列表，点哪个加载哪个（省内存/CPU）
+  if (state.config.autoLoadSessions === undefined && !state._cfgAsked) {
+    state._cfgAsked = true;
+    try { state.config = { ...state.config, ...(await api('/api/config')) }; } catch { }
+  }
+  if (state.config.autoLoadSessions === false) return;
+  const cached = loadSessionCache();
+  if (cached && !state.sessionsLoaded) {
+    state.sessionsByInstance = cached;
+    state.sessionsLoaded = true;
+    for (const k of Object.keys(cached)) state.instStatus[k] = 'ok';
+    renderRail(); renderSessions();
+    // 快路径渲染后，后台静默刷新一次（不阻塞交互）——刚结束的会话几秒后自动出现（审核 P3）
+    setTimeout(async () => {
+      for (const inst of state.instances) {
+        try {
+          const fresh = await api(`/api/sessions?instance=${encodeURIComponent(inst.id)}`);
+          if (JSON.stringify(fresh) !== JSON.stringify(state.sessionsByInstance[inst.id])) {
+            state.sessionsByInstance[inst.id] = fresh;
+            saveSessionCache();
+            renderRail();
+            if (!state.searchActive) renderSessions();
+            if (state.relay) renderRelaySrcList();
+          }
+        } catch { }
+      }
+    }, 800);
+    return;
+  }
   state.sessionsLoaded = true;
   for (const inst of state.instances) {
     if (state.sessionsByInstance[inst.id] || state.instStatus[inst.id] === 'loading') continue;
@@ -164,6 +219,7 @@ async function ensureSessions() {
     try {
       state.sessionsByInstance[inst.id] = await api(`/api/sessions?instance=${encodeURIComponent(inst.id)}`);
       state.instStatus[inst.id] = 'ok';
+      saveSessionCache();
     } catch {
       state.instStatus[inst.id] = 'error';
       state.sessionsByInstance[inst.id] = [];
@@ -203,7 +259,25 @@ function renderRail() {
   $$('#agent-rail .agent-card').forEach((c) => c.addEventListener('click', () => {
     state.currentAgent = c.dataset.agent;
     renderRail(); renderSessions();
+    loadInstanceSessionsIfNeeded(c.dataset.agent); // 自动加载关闭时：点了谁才扫谁
   }));
+}
+
+// 按需加载单个实例的会话列表（自动加载关闭 / 尚未加载时）
+async function loadInstanceSessionsIfNeeded(instanceId) {
+  if (!instanceId || instanceId === 'all') return;
+  if (state.sessionsByInstance[instanceId] || state.instStatus[instanceId] === 'loading') return;
+  state.instStatus[instanceId] = 'loading';
+  renderRail(); renderSessions();
+  try {
+    state.sessionsByInstance[instanceId] = await api(`/api/sessions?instance=${encodeURIComponent(instanceId)}`);
+    state.instStatus[instanceId] = 'ok';
+  } catch {
+    state.instStatus[instanceId] = 'error';
+    state.sessionsByInstance[instanceId] = [];
+  }
+  renderRail(); renderSessions();
+  if (state.relay) renderRelaySrcList();
 }
 
 function allSessionsLoaded() {
@@ -223,21 +297,55 @@ function renderSessions() {
   const box = $('#session-list');
   const MAX = 400;
   const shown = list.slice(0, MAX);
-  box.innerHTML = shown.map((s) => `
-    <div class="sess-item ${state.current && state.current.id === s.id && state.current.instance === s.instance ? 'selected' : ''}" data-instance="${esc(s.instance)}" data-id="${esc(s.id)}">
+  // zcode 子会话树形折叠：只把 sess_subagent_*（agent 派生的子代理）挂到主会话下折叠；
+  // fork（parent_id 指向 fork 来源）保持顶层平铺——否则用户 fork 出的主力会话会被藏进父会话（实测教训）
+  const kidsByParent = new Map();
+  const rootList = [];
+  const inShown = new Set(shown.map((s) => s.instance + '|' + s.id));
+  for (const s of shown) {
+    const isSub = s.sub === 'subagent';
+    const pk = isSub && s.parentId ? s.instance + '|' + s.parentId : null;
+    if (pk && inShown.has(pk)) {
+      if (!kidsByParent.has(pk)) kidsByParent.set(pk, []);
+      kidsByParent.get(pk).push(s);
+    } else rootList.push(s);
+  }
+  if (!state.subExpanded) state.subExpanded = new Set();
+  const sessRow = (s, isSub) => `
+    <div class="sess-item ${isSub ? 'sess-sub' : ''} ${state.current && state.current.id === s.id && state.current.instance === s.instance ? 'selected' : ''}" data-instance="${esc(s.instance)}" data-id="${esc(s.id)}">
       <span class="sess-dot" style="background:${typeColor(s.agent)}"></span>
       <div class="sess-body">
-        <div class="sess-title">${esc(s.title || t('（无标题）'))}</div>
+        <div class="sess-title">${esc(s.title || t('（无标题）'))}${s.sub === 'subagent' ? ` <span class="badge" title="${esc(t('agent 派生的子代理会话'))}">${esc(t('子代理'))}</span>` : s.sub === 'fork' ? ` <span class="badge" title="${esc(t('从其他会话分叉而来'))}">fork</span>` : ''}</div>
         <div class="sess-meta">
           <span title="${esc(fmtTime(s.tsLast))}">${fmtRelTime(s.tsLast)}</span>
           ${s.cwd ? `<span title="${esc(s.cwd)}">${esc(shortPath(s.cwd))}</span>` : ''}
-          ${s.msgCount != null ? `<span>${s.msgCount}${t('条')}</span>` : ''}
+          ${s.msgCount != null ? `<span>${s.msgCount} ${t('条')}</span>` : ''}
           ${s.tokens ? `<span>${fmtTokens(s.tokens)} tok</span>` : ''}
         </div>
       </div>
-    </div>`).join('')
-    + (list.length > MAX ? `<div class="muted" style="padding:12px">${t('仅显示最近 400 条，请用搜索缩小范围')}</div>` : '');
+    </div>`;
+  const subToggle = (parentId, kids) => {
+    const open = state.subExpanded.has(parentId);
+    return `<button class="btn tiny ghost sub-toggle" data-subtoggle="${esc(parentId)}">${open ? '▾' : '▸'} ${kids.length} ${t('子会话')}</button>`;
+  };
+  box.innerHTML = rootList.map((s) => {
+    const key = s.instance + '|' + s.id;
+    const kids = kidsByParent.get(key);
+    return sessRow(s, false)
+      + (kids ? subToggle(key, kids) + (state.subExpanded.has(key) ? kids.map((k) => sessRow(k, true)).join('') : '') : '');
+  }).join('')
+    + (list.length > MAX ? `<div class="muted" style="padding:12px">${t('仅显示最近 400 条，请用搜索缩小范围')}</div>`
+      : '')
+    + (!list.length && state.config.autoLoadSessions === false && state.currentAgent === 'all'
+      ? `<div class="muted" style="padding:16px">${t('自动加载已关闭：点击左侧 agent 加载其会话')}</div>` : '');
   $$('#session-list .sess-item').forEach((el) => el.addEventListener('click', () => openDetail(el.dataset.instance, el.dataset.id)));
+  // 子会话折叠开关（不触发行点击）
+  $$('#session-list [data-subtoggle]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const id = b.dataset.subtoggle;
+    if (state.subExpanded.has(id)) state.subExpanded.delete(id); else state.subExpanded.add(id);
+    renderSessions();
+  }));
 }
 
 /* ---------------- 详情（分页 + 逐条勾选） ---------------- */
@@ -268,6 +376,10 @@ async function openDetail(instance, id) {
       total: msx.total || msx.entries.length, hasMore: !!msx.hasMore, previewTruncated: !!msx.previewTruncated,
     };
     state.excluded = new Set();
+    state.edit = { on: false, removals: new Set(), edits: new Map(), inserts: [] };
+    syncEditModeUi(); // 换会话时恢复按钮/惯性状态（审核 P2：mid-edit 切会话曾卡住惯性）
+    state.ctxFilter = '';
+    state.renderFrom = 0;
     state.options.from = 0;
     clearTimeout(timer);
     renderDetail();
@@ -283,16 +395,34 @@ async function openDetail(instance, id) {
   }
 }
 
+// 会话预览关键词高亮：对原始文本按命中分段，逐段 esc 后用 <mark> 连接——
+// 先分割后转义，任何搜索词（含 amp/lt 等实体名）都不会切坏 HTML 实体（审核 P4）
+function markHits(raw, term) {
+  if (!term) return esc(raw);
+  const safe = String(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try {
+    return raw.split(new RegExp('(' + safe.replace(/ /g, '\\s+') + ')', 'gi'))
+      .map((p) => (p.toLowerCase() === String(term).toLowerCase() ? '<mark>' + esc(p) + '</mark>' : esc(p)))
+      .join('');
+  } catch { return esc(raw); }
+}
+
 function renderBlock(b) {
+  const q = state.ctxFilter || '';
   if (b.type === 'text') {
     const tx = b.text || '';
-    return `<div class="t">${esc(tx.length > 2048 ? tx.slice(0, 2048) + '…' : tx)}</div>`;
+    const raw = tx.length > 2048 ? tx.slice(0, 2048) + '…' : tx;
+    return `<div class="t">${q ? markHits(raw, q) : esc(raw)}</div>`;
   }
-  if (b.type === 'thinking') return `<div class="entry-body thinking"><span class="ic-inline">${icon('brain')}</span>${esc((b.text || '').slice(0, 300))}${(b.text || '').length > 300 ? '…' : ''}</div>`;
+  if (b.type === 'thinking') {
+    const raw = (b.text || '').slice(0, 300) + ((b.text || '').length > 300 ? '…' : '');
+    return `<div class="entry-body thinking"><span class="ic-inline">${icon('brain')}</span>${q ? markHits(raw, q) : esc(raw)}</div>`;
+  }
   if (b.type === 'tool_use') return `<div class="entry-body"><span class="tool-tag">${icon('wrench')} ${esc(b.name)}</span> <span class="muted">${esc(JSON.stringify(b.input ?? {}).slice(0, 200))}</span></div>`;
   if (b.type === 'tool_result') {
     const out = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
-    return `<div class="entry-body"><span class="tool-tag">↳</span> <span class="muted">${esc(out.slice(0, 260))}${out.length > 260 ? `…[${out.length}]` : ''}</span></div>`;
+    const raw = out.slice(0, 260) + (out.length > 260 ? `…[${out.length}]` : '');
+    return `<div class="entry-body"><span class="tool-tag">↳</span> <span class="muted">${q ? markHits(raw, q) : esc(raw)}</span></div>`;
   }
   if (b.type === 'image') return `<div class="entry-body muted">${icon('image')} image</div>`;
   return '';
@@ -314,6 +444,7 @@ function renderDetail() {
         ${esc(msx.project.cwd || '')} · ${msx.stats.entries} ${t('条')} · ${msx.stats.userTurns} ${t('轮')} · ${msx.stats.toolCalls} ${t('工具调用')} · ~${fmtTokens(msx.stats.approxTokens)} tokens
         <span title="${esc(fmtTime(lastTs))}"> · ${t('最后活动')} ${fmtRelTime(lastTs)}</span>
       </div>
+      <div id="sub-sessions"></div>
     </div>
     <div class="sel-bar">
       <label><input type="checkbox" id="opt-thinking" ${o.includeThinking ? 'checked' : ''}> ${esc(t('思考'))}</label>
@@ -333,8 +464,26 @@ function renderDetail() {
       <button class="btn small ghost" id="sel-reset">${esc(t('重置排除'))}</button>
       <button class="btn small ghost" id="sel-last10">${esc(t('仅最近10轮'))}</button>
       <button class="btn small ghost" id="sel-compact" ${lastCompact < 0 ? 'disabled' : ''} title="${lastCompact < 0 ? esc(t('该会话没有 compact 记录')) : esc(t('从最近一次压缩边界之后开始接力（含压缩摘要），等价于源 agent 当前的活上下文'))}">${esc(t('从最近 compact 起'))}</button>
+      <span class="divider"></span>
+      <button class="btn small ${state.edit.on ? '' : 'ghost'}" id="btn-edit-mode" title="${esc(t('编辑上下文：删除/改写条目、插入用户/助手/工具内容、批量粘贴其他会话片段'))}">${esc(t('编辑模式'))}</button>
+      <span class="muted" id="edit-dirty" style="display:none"></span>
+      <span id="edit-savebox" style="display:none">
+        <button class="btn small primary" id="btn-save-inplace" title="${esc(t('把编辑写回该会话的原生存储（claude/zcode 支持；写前自动备份）'))}">${esc(t('就地保存'))}</button>
+        <button class="btn small" id="btn-save-new" title="${esc(t('把编辑后的内容另存为一个新会话（原会话不动，全部 agent 支持）'))}">${esc(t('另存为新会话'))}</button>
+        <button class="btn small ghost" id="btn-edit-discard">${esc(t('放弃改动'))}</button>
+      </span>
     </div>
-    ${state.current.previewTruncated ? `<div class="muted" style="padding:12px 24px 0">${esc(t('预览截断说明'))}</div>` : ''}
+    ${state.current.previewTruncated ? `<div class="muted" style="padding:4px 24px 0; font-size:11px">${esc(t('预览截断说明'))}</div>` : ''}
+    <div class="entries-head">
+      <div class="search-wrap" style="flex:1; min-width:120px">
+        <span class="search-ic">${icon('search')}</span>
+        <input type="text" id="ctx-search" class="input" placeholder="${esc(t('在会话预览里搜索关键词'))}" value="${esc(state.ctxFilter || '')}" title="${esc(t('过滤并高亮已加载条目（客户端，不发起请求）'))}">
+      </div>
+      <span class="muted" id="ctx-count"></span>
+      <span class="divider"></span>
+      <button class="btn small ghost" id="sel-all-loaded" title="${esc(t('勾选全部已加载条目（加入接力）'))}">${esc(t('全选'))}</button>
+      <button class="btn small ghost" id="sel-none-loaded" title="${esc(t('全部取消勾选（排除后可逐条再勾回）'))}">${esc(t('全不选'))}</button>
+    </div>
     <div class="entries" id="entries"></div>
     <div class="detail-foot">
       <span class="est" id="preview-est">${esc(t('统计中…'))}</span>
@@ -344,31 +493,100 @@ function renderDetail() {
     </div>`;
   renderEntries();
   bindDetailControls();
+  syncEditModeUi(); // 语言切换 mid-edit 时按钮状态同步（审核 P4）
   refreshPreview();
+  loadSubSessions();
 }
 
 const ROLE_LABEL = () => ({ user: t('用户'), assistant: t('助手'), meta: t('系统'), system: t('系统') });
 
+// 条目纯文本（搜索/复制用）
+function entryText(e) {
+  return (e.blocks || []).map((b) => {
+    if (b.type === 'text' || b.type === 'thinking') return b.text || '';
+    if (b.type === 'tool_use') return `[${b.name}] ${JSON.stringify(b.input ?? {})}`;
+    if (b.type === 'tool_result') return typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+    return '';
+  }).join('\n');
+}
+
+function editDirtyCount() {
+  const e = state.edit;
+  return e.removals.size + e.edits.size + e.inserts.length;
+}
+
 function renderEntries() {
   const { msx } = state.current;
-  const entries = msx.entries.slice(0, 400);
+  if (!msx.entries.length) {
+    $('#entries').innerHTML = `<div class="muted" style="padding:20px 24px">${t('该会话在本地存储中没有消息记录（子代理正文可能只在运行时存在）')}</div>`;
+    const cc = $('#ctx-count');
+    if (cc) cc.textContent = '';
+    return;
+  }
+  // 窗口式渲染：每屏最多 400 条（几千条的会话全量渲染会撑爆渲染进程——之前 about:blank 崩溃的根因）。
+  // 编辑器通过 前/后 400 条 按钮移动窗口，可达任意区间。
+  const RF = 400;
+  if (state.renderFrom == null || state.renderFrom < 0 || state.renderFrom >= msx.entries.length) state.renderFrom = 0;
+  const entries = msx.entries.slice(state.renderFrom, state.renderFrom + RF);
   const roles = ROLE_LABEL();
-  $('#entries').innerHTML = entries.map((e) => {
+  const ed = state.edit;
+  const ql = (state.ctxFilter || '').toLowerCase();
+  let matches = 0;
+  const html = entries.map((e) => {
     const excluded = state.excluded.has(e.id);
+    const removed = ed.on && ed.removals.has(e.id);
     const isTool = e.kind === 'tool-result';
-    return `<div class="entry ${excluded ? 'excluded' : ''}" data-id="${esc(e.id)}">
+    // 工具结果不是"用户"发言：claude/codex 等把 tool_result 记在 user 名下，展示按 kind 归位
+    const roleLabel = isTool ? t('工具结果') : (roles[e.role] || e.role);
+    const roleColor = isTool ? 'var(--muted)' : e.role === 'user' ? 'var(--accent2)' : e.role === 'assistant' ? 'var(--ok)' : 'var(--muted)';
+    const editedText = ed.edits.get(e.id);
+    const bodyHtml = editedText != null
+      ? `<div class="entry-edited">${esc(editedText)}</div>`
+      : (e.blocks || []).map(renderBlock).join('');
+    const text = entryText(e);
+    const hit = ql ? text.toLowerCase().includes(ql) : true;
+    if (ql && hit) matches++;
+    const hitAttr = ql ? (hit ? ' data-hit="1"' : ' style="display:none"') : '';
+    const actions = ed.on ? `
+      <div class="entry-actions">
+        <button class="btn small ghost" data-act="edit" data-id="${esc(e.id)}" title="${esc(t('改写这条的内容'))}">${esc(t('改写'))}</button>
+        <button class="btn small ghost" data-act="del" data-id="${esc(e.id)}" title="${esc(t('从上下文中删除这条（保存时生效）'))}">${removed ? esc(t('撤销删除')) : esc(t('删除'))}</button>
+        <button class="btn small ghost" data-act="copy" data-id="${esc(e.id)}" title="${esc(t('复制这条的全文'))}">${esc(t('复制'))}</button>
+        <button class="btn small ghost" data-act="ins" data-id="${esc(e.id)}" title="${esc(t('在这条后面插入新内容（用户/助手/工具对）'))}">＋${esc(t('插入'))}</button>
+      </div>` : '';
+    return `<div class="entry ${excluded || removed ? 'excluded' : ''}" data-id="${esc(e.id)}"${hitAttr}>
       <div><input type="checkbox" ${excluded ? '' : 'checked'} data-check="${esc(e.id)}"></div>
-      <div class="entry-role" style="color:${e.role === 'user' ? 'var(--accent2)' : e.role === 'assistant' ? 'var(--ok)' : 'var(--muted)'}">
-        ${roles[e.role] || e.role}${isTool ? '<br>↳' : ''}<span class="entry-time">${e.ts ? fmtRelTime(e.ts) : ''}</span>
+      <div class="entry-role" style="color:${roleColor}">
+        ${roleLabel}${isTool ? '<br>↳' : ''}<span class="entry-time">${e.ts ? fmtRelTime(e.ts) : ''}</span>
       </div>
       <div class="entry-body ${e.blocks && e.blocks[0] && e.blocks[0].type === 'thinking' ? 'thinking' : ''}">
-        ${(e.blocks || []).map(renderBlock).join('')}
+        ${bodyHtml}
+        ${actions}
       </div>
-    </div>`;
-  }).join('')
+    </div>`
+      + (ed.on ? renderInsertsAfter(e.id, roles) : '');
+  }).join('');
+  // 全不选后提醒：未加载的条目仍会包含在接力里（客户端只有部分数据）
+  const unloadedHint = (state.current.hasMore && state.excluded.size)
+    ? `<div class="muted" style="padding:4px 24px">${esc(t('未加载的 N 条仍将包含在接力中（先点加载更多可全量控制）').replace('N', String(Math.max(0, state.current.total - msx.entries.length))))}</div>`
+    : '';
+  $('#entries').innerHTML
+    = unloadedHint
+    + (state.renderFrom > 0 ? `<button class="btn small ghost" id="win-prev" style="margin:10px auto 4px; display:block">← ${t('前 400 条')}（${state.renderFrom}）</button>` : '')
+    + html
+    + (ed.on ? renderInsertsAfter(null, roles) : '')
+    + (state.renderFrom + RF < msx.entries.length
+      ? `<button class="btn small ghost" id="win-next" style="margin:10px auto 4px; display:block">${t('后 400 条')} →（${state.renderFrom + RF}–${Math.min(state.renderFrom + RF * 2, msx.entries.length)}）</button>`
+      : '')
     + (state.current.hasMore
       ? `<button class="btn small" id="load-more" style="margin:12px auto; display:block">${t('加载更多')}（${t('已加载')} ${msx.entries.length}/${state.current.total}）</button>`
       : '');
+  $('#entries').classList.toggle('editing-on', ed.on);
+  const wp = $('#win-prev'), wn = $('#win-next');
+  if (wp) wp.addEventListener('click', () => { state.renderFrom = Math.max(0, state.renderFrom - RF); renderEntries(); });
+  if (wn) wn.addEventListener('click', () => { state.renderFrom = state.renderFrom + RF; renderEntries(); });
+  const cc = $('#ctx-count');
+  if (cc) cc.textContent = ql ? `${matches} ${t('本屏命中')}` : '';
   $$('#entries .entry input[type=checkbox]').forEach((cb) => cb.addEventListener('click', (ev) => {
     ev.stopPropagation();
     const id = cb.dataset.check;
@@ -377,13 +595,215 @@ function renderEntries() {
     refreshPreview();
   }));
   $$('#entries .entry').forEach((el) => el.addEventListener('click', (ev) => {
-    if (ev.target.tagName === 'INPUT') return;
+    if (ev.target.tagName === 'INPUT' || ev.target.closest('.entry-actions') || ev.target.tagName === 'TEXTAREA' || ev.target.tagName === 'BUTTON') return;
     const cb = el.querySelector('input[type=checkbox]');
     cb.checked = !cb.checked;
     cb.dispatchEvent(new Event('click'));
   }));
+  bindEntryActions();
   const lm = $('#load-more');
   if (lm) lm.addEventListener('click', () => loadMoreEntries());
+}
+
+// 已排队插入项的渲染（挂在 afterId 之后；afterId=null 的排在末尾）
+function renderInsertsAfter(afterId, roles) {
+  const list = state.edit.inserts.filter((x) => (x.afterId || null) === (afterId || null));
+  return list.map((x, i) => {
+    const idx = state.edit.inserts.indexOf(x);
+    const roleLabel = x.entry.kind === 'tool-result' ? t('工具结果') : (roles[x.entry.role] || x.entry.role);
+    const text = entryText(x.entry).slice(0, 2000);
+    return `<div class="entry insert-pending" data-ins="${idx}">
+      <div></div>
+      <div class="entry-role" style="color:var(--warn, #d9a441)">＋${esc(roleLabel)}</div>
+      <div class="entry-body"><div class="entry-edited">${esc(text)}</div>
+        <button class="btn small ghost" data-act="unins" data-ins="${idx}">${esc(t('移除此插入'))}</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function bindEntryActions() {
+  const box = $('#entries');
+  if (!box) return;
+  const refresh = () => { renderEntries(); updateEditDirty(); };
+  $$('#entries [data-act]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const act = b.dataset.act;
+    if (act === 'del') {
+      const id = b.dataset.id;
+      if (state.edit.removals.has(id)) state.edit.removals.delete(id); else state.edit.removals.add(id);
+      refresh();
+    } else if (act === 'copy') {
+      const e = state.current.msx.entries.find((x) => x.id === b.dataset.id);
+      if (e) copyText(entryText(e));
+    } else if (act === 'edit') {
+      const e = state.current.msx.entries.find((x) => x.id === b.dataset.id);
+      if (!e) return;
+      const body = b.closest('.entry').querySelector('.entry-body');
+      const cur = state.edit.edits.get(e.id) != null ? state.edit.edits.get(e.id) : entryText(e);
+      body.innerHTML = `<textarea class="edit-area" rows="14" style="width:100%">${esc(cur)}</textarea>
+        <div style="display:flex; gap:8px; margin-top:6px">
+          <button class="btn small primary" data-act2="save" data-id="${esc(e.id)}">${esc(t('保存改写'))}</button>
+          <button class="btn small ghost" data-act2="cancel">${esc(t('取消'))}</button></div>`;
+      const ta = body.querySelector('textarea');
+      ta.focus();
+      body.querySelector('[data-act2=save]').addEventListener('click', () => {
+        const v = ta.value;
+        if (!v.trim()) return toast(t('内容为空：请用「删除」移除条目'), 'warn');
+        state.edit.edits.set(e.id, v);
+        refresh();
+      });
+      body.querySelector('[data-act2=cancel]').addEventListener('click', refresh);
+    } else if (act === 'ins') {
+      openInsertForm(b.dataset.id);
+    } else if (act === 'unins') {
+      state.edit.inserts.splice(Number(b.dataset.ins), 1);
+      refresh();
+    }
+  }));
+  // ctx-search 绑定在 bindDetailControls（一次），此处不再重复
+}
+
+// 编辑模式 UI 状态统一同步（按钮文案/主色/惯性滚动开关）——三条退出路径共用
+function syncEditModeUi() {
+  const em = $('#btn-edit-mode');
+  if (em) {
+    em.textContent = state.edit.on ? t('编辑模式 · 开') : t('编辑模式');
+    em.classList.toggle('primary', state.edit.on);
+    em.classList.toggle('ghost', !state.edit.on);
+  }
+  document.body.dataset.noMomentum = state.edit.on ? '1' : '';
+}
+
+function updateEditDirty() {
+  const n = editDirtyCount();
+  const el = $('#edit-dirty'), box = $('#edit-savebox');
+  if (!el || !box) return;
+  el.style.display = n ? '' : 'none';
+  box.style.display = state.edit.on && n ? '' : 'none';
+  el.textContent = `${t('待保存改动')} ${n}`;
+  syncEditModeUi();
+}
+
+// 插入表单：用户/助手/工具对，可多条排队；也支持粘贴导出的 ARX 片段批量插入
+function openInsertForm(afterId) {
+  const old = document.querySelector('.insert-form');
+  if (old) old.remove();
+  const anchorEl = afterId ? document.querySelector(`.entry[data-id="${CSS.escape(afterId)}"]`) : null;
+  const form = document.createElement('div');
+  form.className = 'insert-form';
+  form.innerHTML = `
+    <div class="flabel">${esc(t('插入新内容'))}${afterId ? ` ← ${esc(t('在这条之后'))}` : ` ← ${esc(t('追加到末尾'))}`}</div>
+    <select class="input" id="ins-role" style="max-width:220px">
+      <option value="user">${esc(t('用户消息'))}</option>
+      <option value="assistant">${esc(t('助手回复'))}</option>
+      <option value="toolpair">${esc(t('工具调用 + 结果（对）'))}</option>
+      <option value="arx">${esc(t('粘贴 ARX 片段（跨 agent 批量插入）'))}</option>
+    </select>
+    <textarea class="input" id="ins-text" rows="4" style="width:100%; margin-top:6px" placeholder="${esc(t('输入要插入的内容'))}"></textarea>
+    <div class="muted" id="ins-format" style="margin-top:4px; display:none">${esc(t('工具对格式：第一行工具名，第二行起调用参数(JSON)，单独一行 --- ，之后是结果文本'))}</div>
+    <div style="display:flex; gap:8px; margin-top:6px">
+      <button class="btn small primary" id="ins-add">${esc(t('加入待保存队列'))}</button>
+      <button class="btn small ghost" id="ins-cancel">${esc(t('取消'))}</button>
+      <span class="muted" id="ins-hint"></span>
+    </div>`;
+  if (anchorEl) anchorEl.after(form); else $('#entries').appendChild(form);
+  form.querySelector('#ins-cancel').addEventListener('click', () => form.remove());
+  form.querySelector('#ins-add').addEventListener('click', () => {
+    const kind = form.querySelector('#ins-role').value;
+    const text = form.querySelector('#ins-text').value;
+    const hint = form.querySelector('#ins-hint');
+    const ts = new Date().toISOString();
+    try {
+      if (kind === 'arx') {
+        const obj = JSON.parse(text);
+        const list = Array.isArray(obj) ? obj : (obj.entries || [obj]);
+        let n = 0;
+        for (const raw of list) {
+          if (!raw || !Array.isArray(raw.blocks)) continue;
+          state.edit.inserts.push({ afterId, entry: { role: raw.role || 'user', kind: raw.kind || 'text', blocks: raw.blocks, ts: raw.ts || ts } });
+          n++;
+        }
+        if (!n) throw new Error('ARX 片段中没有可插入的条目');
+        hint.textContent = `+${n}`;
+      } else if (kind === 'toolpair') {
+        const lines = text.split('\n');
+        const name = (lines.shift() || 'tool').trim() || 'tool';
+        const sep = lines.findIndex((l) => l.trim() === '---');
+        const argText = (sep === -1 ? lines.join('\n') : lines.slice(0, sep).join('\n')).trim();
+        const outText = sep === -1 ? '' : lines.slice(sep + 1).join('\n');
+        const callId = 'ins_' + Date.now().toString(36);
+        // 调用与结果挂同一锚点：applySessionEdits 逆序处理后 call 紧贴锚点、result 紧随其后
+        // （拆开会让 claude 的 tool_result 远离 tool_use，resume 报 400——审核 P2）
+        state.edit.inserts.push({ afterId, entry: { role: 'assistant', kind: 'text', blocks: [{ type: 'tool_use', id: callId, name, input: safeParse(argText, argText) }] } });
+        state.edit.inserts.push({ afterId, entry: { role: 'user', kind: 'tool-result', blocks: [{ type: 'tool_result', for: callId, output: outText, isError: false }] } });
+        hint.textContent = '+1 对';
+      } else {
+        if (!text.trim()) throw new Error('内容为空');
+        state.edit.inserts.push({ afterId, entry: { role: kind, kind: 'text', blocks: [{ type: 'text', text }] } });
+        hint.textContent = '+1';
+      }
+      form.remove();
+      renderEntries();
+      updateEditDirty();
+    } catch (e) { hint.textContent = e.message; hint.classList.add('err'); }
+  });
+  form.querySelector('#ins-role').addEventListener('change', () => {
+    form.querySelector('#ins-format').style.display = form.querySelector('#ins-role').value === 'toolpair' ? '' : 'none';
+  });
+}
+
+// 子会话（zcode subagent/fork）：detail-head 下的原生 <details> 折叠区（真折叠按钮，不藏在长列表后面）
+async function loadSubSessions() {
+  const box = $('#sub-sessions');
+  if (!box || !state.current) return;
+  const { instance, id, agent } = state.current;
+  if (agent !== 'zcode') return;
+  try {
+    const kids = await api(`/api/sessions?instance=${encodeURIComponent(instance)}&parent=${encodeURIComponent(id)}`);
+    if (!kids.length) { box.remove(); return; }
+    box.innerHTML = `<details class="sub-collapsible">
+      <summary>${esc(t('子会话'))} (${kids.length})</summary>
+      <div class="sub-list">
+        ${kids.map((k) => `
+        <div class="sess-item" data-instance="${esc(instance)}" data-id="${esc(k.id)}">
+          <span class="sess-dot" style="background:${typeColor(k.agent)}"></span>
+          <div class="sess-body"><div class="sess-title">${esc(k.sub === 'subagent' ? t('子代理') : 'fork')} · ${esc(k.title || t('（无标题）'))}</div>
+          <div class="sess-meta"><span>${k.msgCount ?? 0} ${t('条')}</span></div></div>
+        </div>`).join('')}
+      </div>
+    </details>`;
+    $$('#sub-sessions .sess-item').forEach((el) => el.addEventListener('click', () => openDetail(el.dataset.instance, el.dataset.id)));
+  } catch { box.remove(); }
+}
+
+// 保存编辑：inplace（claude/zcode 原位）或 new（同 agent 另存为新会话）
+async function saveEdits(mode) {
+  const c = state.current;
+  if (!c) return;
+  const e = state.edit;
+  if (!editDirtyCount()) return toast(t('没有任何改动'), 'warn');
+  const msg = mode === 'inplace'
+    ? t('就地保存会改写该会话的原生存储（写前自动备份，可还原）。确认执行？')
+    : t('把编辑后的内容另存为一个新会话（原会话不动）。确认？');
+  if (!window.confirm(msg)) return;
+  try {
+    const r = await api('/api/session/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instance: c.instance, sessionId: c.id, mode,
+        edits: { removals: [...e.removals], edits: [...e.edits.entries()].map(([id, text]) => ({ id, text })), inserts: e.inserts },
+      }),
+    });
+    toast(`${t('已保存')}：${(r.summary || {}).removed || 0}删/${(r.summary || {}).edited || 0}改/${(r.summary || {}).inserted || 0}插 — ${r.note || ''}` +
+      (r.loss && r.loss.length ? ` | ${r.loss.slice(0, 2).join('；')}${r.loss.length > 2 ? '…' : ''}` : ''), r.loss && r.loss.length ? 'warn' : '');
+    state.edit = { on: false, removals: new Set(), edits: new Map(), inserts: [] };
+    syncEditModeUi();
+    state.ctxFilter = '';
+    state.renderFrom = 0;
+    loadAgents(true);
+    openDetail(c.instance, mode === 'inplace' ? c.id : r.id);
+  } catch (err) { toast(t('保存失败: ') + err.message, 'err'); }
 }
 
 async function loadMoreEntries() {
@@ -401,6 +821,43 @@ async function loadMoreEntries() {
 }
 
 function bindDetailControls() {
+  // 上下文编辑器控件（renderEntries 之外只绑定一次的元素）
+  const em = $('#btn-edit-mode');
+  if (em) em.addEventListener('click', () => {
+    state.edit.on = !state.edit.on;
+    if (!state.edit.on) { state.edit.removals = new Set(); state.edit.edits = new Map(); state.edit.inserts = []; }
+    // 编辑模式状态要一眼可见：统一走 syncEditModeUi（文案 + 主色 + 惯性滚动开关）
+    syncEditModeUi();
+    renderEntries(); updateEditDirty();
+  });
+  const cs = $('#ctx-search');
+  if (cs) {
+    // 防抖：400+ 条目全量重渲染不跟随每次击键（审核 P4）
+    let ctxTimer = null;
+    cs.addEventListener('input', () => {
+      clearTimeout(ctxTimer);
+      ctxTimer = setTimeout(() => { state.ctxFilter = cs.value; renderEntries(); }, 160);
+    });
+  }
+  const sa = $('#sel-all-loaded'), sn = $('#sel-none-loaded');
+  if (sa) sa.addEventListener('click', () => {
+    for (const e of state.current.msx.entries) state.excluded.delete(e.id);
+    renderEntries(); refreshPreview();
+  });
+  if (sn) sn.addEventListener('click', () => {
+    for (const e of state.current.msx.entries) state.excluded.add(e.id);
+    renderEntries(); refreshPreview();
+  });
+  const bi = $('#btn-save-inplace');
+  if (bi) bi.addEventListener('click', () => saveEdits('inplace'));
+  const bn = $('#btn-save-new');
+  if (bn) bn.addEventListener('click', () => saveEdits('new'));
+  const bd = $('#btn-edit-discard');
+  if (bd) bd.addEventListener('click', () => {
+    state.edit = { on: false, removals: new Set(), edits: new Map(), inserts: [] };
+    syncEditModeUi();
+    renderEntries(); updateEditDirty();
+  });
   const bind = (id, key, type) => {
     const el = $(id);
     el.addEventListener('change', () => {
@@ -519,19 +976,31 @@ async function fullTextSearch(q) {
 }
 
 /* ---------------- 接力向导 ---------------- */
+// 能力取实时 /api/agents 的 cap（服务端 META 单一事实源），未拿到时回落本地兜底表
+function capOf(type) {
+  const inst = state.instances.find((i) => i.type === type);
+  return (inst && inst.cap) || AGENT_CAPS[type] || { t0: 0, t1: 0 };
+}
+
 function recommendMode(srcInstance, tgtInstance) {
   const src = state.instances.find((i) => i.id === srcInstance);
   const tgt = state.instances.find((i) => i.id === tgtInstance);
-  if (src && tgt && src.type === tgt.type) return 'T0';
-  if (tgt && tgt.type === 'workbuddy') return 'T2';
-  return 'T1';
+  if (!tgt) return 'T1';
+  const cap = capOf(tgt.type);
+  if (src && tgt && src.type === tgt.type && cap.t0) return 'T0';
+  if (cap.t1) return 'T1';
+  return 'T2';
 }
 
-/* 每个目标推荐的级别与理由（T1 通道：claude/codex/zcode/workbuddy/opencode） */
+/* 每个目标推荐的级别与理由（能力来自服务端 cap，不再散落硬编码清单） */
 function targetAdvice(srcIid, tgtInst) {
   const src = state.instances.find((i) => i.id === srcIid);
-  if (src && tgtInst && src.type === tgtInst.type) return { mode: 'T0', why: t('同源复制，100% 保真，原生 resume 直接续') };
-  if (tgtInst && ['claude', 'codex', 'zcode', 'workbuddy', 'opencode'].includes(tgtInst.type)) return { mode: 'T1', why: t('原生注入并注册，resume 或会话列表直接出现') };
+  const cap = tgtInst ? capOf(tgtInst.type) : { t0: 0, t1: 0 };
+  if (src && tgtInst && src.type === tgtInst.type && cap.t0) return { mode: 'T0', why: t('同源复制，100% 保真，原生 resume 直接续') };
+  if (tgtInst && cap.t1) {
+    const exp = state.instances.some((i) => i.type === tgtInst.type && i.experimental);
+    return { mode: 'T1', why: t('原生注入并注册，resume 或会话列表直接出现') + (exp ? t('（实验性适配器：格式未公开，出问题可回退 T2）') : '') };
+  }
   return { mode: 'T2', why: t('该 agent 无原生写入适配器，逐字转写是唯一通道') };
 }
 
@@ -569,6 +1038,7 @@ function renderRelay() {
   $('#relay-src-agents').innerHTML = chips.join('');
   $$('#relay-src-agents .chip').forEach((c) => c.addEventListener('click', () => {
     m.srcAgent = c.dataset.src;
+    loadInstanceSessionsIfNeeded(c.dataset.src); // 自动加载关闭时：接力页点谁也按需扫谁（审核 P3）
     renderRelaySrcList();
     renderRelayChips();
   }));
@@ -589,8 +1059,9 @@ function renderRelay() {
     const ag = state.instances.find((a) => a.id === id);
     if (ag && !ag.available) { toast(ag.name + ': ' + t('未检测到存储'), 'warn'); return; }
     if (m.targets.has(id)) m.targets.delete(id); else m.targets.add(id);
+    // 推荐级别统一走 targetAdvice（读 META cap）——同源但目标不支持 T0（如 cursor/workbuddy）时不会误选
     const srcIids = [...m.selected.keys()];
-    if (m.targets.size === 1) m.mode = srcIids.length === 1 && srcIids[0] === [...m.targets][0] ? 'T0' : recommendMode(srcIids[0], [...m.targets][0]);
+    if (m.targets.size === 1 && srcIids.length === 1) m.mode = targetAdvice(srcIids[0], ag).mode;
     renderRelay();
   }));
   const srcIids0 = [...m.selected.keys()];
@@ -616,7 +1087,7 @@ function renderRelay() {
       }
       adviceBox.innerHTML = `${esc(t('推荐'))}：${parts.join(' · ')}${m.targets.size > 1 ? ` — ${esc(t('混合目标时取公共级别；不支持原生的目标可单独再跑一次 T2'))}` : ` — ${esc(why)}`}`;
     } else {
-      adviceBox.textContent = t('同源接力选 T0；跨 agent 选 T1 原生注入；目标不支持原生写入（DeepSeek Harness / Gemini CLI / Pi / OpenClaw）时选 T2 逐字转写。');
+      adviceBox.textContent = t('同源接力选 T0；跨 agent 选 T1 原生注入（全部已接入 agent 均支持，实验性适配器会标注）；T2 逐字转写是所有 agent 的通用兜底。');
     }
   }
   // 接力参数编辑器：与详情页共享 state.options，这里可直接改
@@ -628,7 +1099,7 @@ function renderRelay() {
       <label class="opt-check"><input type="checkbox" id="ropt-thinking" ${o.includeThinking ? 'checked' : ''}><span>${esc(t('思考'))}</span></label>
       <label class="opt-check"><input type="checkbox" id="ropt-toolres" ${o.includeToolResults ? 'checked' : ''}><span>${esc(t('工具结果'))}</span></label>
       <label class="opt-check"><input type="checkbox" id="ropt-meta" ${o.includeMeta ? 'checked' : ''}><span>${esc(t('系统注入'))}</span></label>
-      <label class="opt-check" title="${esc(t('按正则脱敏疑似秘钥/凭据后再写入'))}"><input type="checkbox" id="ropt-redact" ${o.redact ? 'checked' : ''}><span>${esc(t('脱敏'))}</span></label>
+      <label class="opt-check" title="${esc(t('按正则脱敏疑似密钥/凭据后再写入'))}"><input type="checkbox" id="ropt-redact" ${o.redact ? 'checked' : ''}><span>${esc(t('脱敏'))}</span></label>
       <span class="divider"></span>
       <label class="opt-num" title="${esc(t('从第 N 条开始接力，0 = 从头'))}">${esc(t('起点'))} <input type="number" id="ropt-from" min="0" value="${o.from}"></label>
       <label class="opt-num" title="${esc(t('超过此 token 上限时从最旧的条目开始丢弃，0 = 不限'))}">${esc(t('上限'))} <input type="number" id="ropt-budget" min="0" step="1000" value="${o.budgetTokens}"> tok</label>
@@ -655,10 +1126,17 @@ function renderRelay() {
   // 手输目录实时写入状态（此前未绑定，手输路径点 Dry-run 会被判为空目录）
   $('#relay-cwd').oninput = (e) => { m.cwd = e.target.value.trim(); };
   $('#relay-backup').checked = m.backup;
-  const srcCount = selCount;
-  $('#relay-run').disabled = srcCount === 0;
-  $('#relay-dryrun').disabled = srcCount === 0;
+  updateRelayButtons();
   if (m.results) $('#relay-results').innerHTML = m.results;
+}
+
+// 接力按钮启停随勾选数刷新（批量全选/全不选也要即时生效——审核 P3）
+function updateRelayButtons() {
+  if (!state.relay) return;
+  const n = [...state.relay.selected.values()].reduce((s, set) => s + set.size, 0);
+  const dry = $('#relay-dryrun'), run = $('#relay-run');
+  if (dry) dry.disabled = n === 0;
+  if (run) run.disabled = n === 0;
 }
 
 function renderRelaySrcList() {
@@ -669,7 +1147,14 @@ function renderRelaySrcList() {
   if (m.srcAgent !== 'all') list = list.filter((s) => s.instance === m.srcAgent);
   if (q) list = list.filter((s) => (s.title || '').toLowerCase().includes(q));
   list.sort((a, b) => String(b.tsLast || '').localeCompare(String(a.tsLast || '')));
-  $('#relay-src-list').innerHTML = list.slice(0, 300).map((s) => {
+  // 批量勾选：对当前筛选结果 全选/全不选（审核用户需求：整个 agent 的会话一键搬家）
+  const scope = list.slice(0, 300);
+  const batchBar = list.length ? `<div class="batch-bar">
+    <button class="btn small ghost" id="relay-sel-all">${esc(t('全选'))}<span class="muted"> ${scope.length}</span></button>
+    <button class="btn small ghost" id="relay-sel-none">${esc(t('全不选'))}</button>
+    <span class="muted">${esc(t('对当前筛选结果生效'))}</span>
+  </div>` : '';
+  $('#relay-src-list').innerHTML = batchBar + scope.map((s) => {
     const checked = m.selected.get(s.instance)?.has(s.id);
     return `<div class="sess-item" data-instance="${esc(s.instance)}" data-id="${esc(s.id)}" title="${esc(t('点击预览，勾选加入接力'))}"><div><input type="checkbox" data-rsel="${esc(s.instance)}|${esc(s.id)}" ${checked ? 'checked' : ''}></div>
       <div class="sess-body"><div class="sess-title">${esc(s.title || t('（无标题）'))}</div>
@@ -680,7 +1165,22 @@ function renderRelaySrcList() {
     const [iid, sid] = cb.dataset.rsel.split('|');
     if (!m.selected.has(iid)) m.selected.set(iid, new Set());
     if (cb.checked) m.selected.get(iid).add(sid); else m.selected.get(iid).delete(sid);
+    updateRelayButtons();
   }));
+  const selAll = $('#relay-sel-all'), selNone = $('#relay-sel-none');
+  if (selAll) selAll.addEventListener('click', () => {
+    for (const s of scope) {
+      if (!m.selected.has(s.instance)) m.selected.set(s.instance, new Set());
+      m.selected.get(s.instance).add(s.id);
+    }
+    renderRelaySrcList();
+    updateRelayButtons();
+  });
+  if (selNone) selNone.addEventListener('click', () => {
+    for (const s of scope) m.selected.get(s.instance)?.delete(s.id);
+    renderRelaySrcList();
+    updateRelayButtons();
+  });
   // 点会话行预览（点勾选框仍是选择，不弹预览）
   $$('#relay-src-list .sess-item').forEach((el) => el.addEventListener('click', (ev) => {
     if (ev.target.tagName === 'INPUT') return;
@@ -707,7 +1207,9 @@ async function openSessionPreview(instance, id) {
         return '';
       }).filter(Boolean).join('\n').slice(0, 420);
       if (!parts) return '';
-      return `<div class="pv-entry" data-role="${esc(e.role)}"><span class="pv-role">${esc(roles[e.role] || e.role)}</span><div class="pv-text">${esc(parts)}${parts.length >= 420 ? '…' : ''}</div></div>`;
+      const isTool = e.kind === 'tool-result';
+      const roleLabel = isTool ? t('工具结果') : (roles[e.role] || e.role);
+      return `<div class="pv-entry" data-role="${esc(isTool ? 'tool' : e.role)}"><span class="pv-role">${esc(roleLabel)}</span><div class="pv-text">${esc(parts)}${parts.length >= 420 ? '…' : ''}</div></div>`;
     }).filter(Boolean).join('');
     $('#modal-body').innerHTML = `
       <div class="pv-meta"><span class="badge" style="border-color:${typeColor(agentType)}">${esc(typeName(agentType))}</span>
@@ -791,7 +1293,7 @@ function resultBoxHtml(r) {
   if (r.backup) bits.push(`<div class="muted">backup: ${esc(r.backup)}</div>`);
   if (r.loss && r.loss.length) bits.push(`<details><summary class="muted">${t('转换说明')} (${r.loss.length})</summary><div class="muted">${[...new Set(r.loss)].slice(0, 8).map(esc).join('<br>')}</div></details>`);
   if (r.notes && r.notes.length) bits.push(`<div class="muted">${r.notes.map(esc).join('<br>')}</div>`);
-  if (r.stats) bits.push(`<div class="muted">${r.stats.entries} ${t('条')} · ~${fmtTokens(r.stats.approxTokens)} tokens</div>`);
+  if (r.stats) bits.push(`<div class="muted">${r.stats.entries} ${t('条')} · ~${fmtTokens(r.stats.approxTokens)} tokens${r.fidelity ? ' · ' + esc(t('保真度')) + ` ${esc(r.fidelity.tier)}·${esc(t('舍弃'))} ${r.fidelity.lossNotes != null ? r.fidelity.lossNotes : ''}` : ''}</div>`);
   return `<div class="result-box ok">${head}${bits.join('')}</div>`;
 }
 
@@ -900,6 +1402,7 @@ async function loadSettings() {
   $('#set-theme').value = localStorage.getItem('ms-theme') || 'dark';
   $('#set-loglevel').value = state.config.logLevel || 'info';
   $('#set-backup').checked = state.config.backupEnabled !== false;
+  $('#set-autoload').checked = state.config.autoLoadSessions !== false;
   $('#set-fontscale').value = state.config.fontScale || 'normal';
   $('#set-bgimage').value = state.config.bgImage || '';
   applyGlass(state.config.bgGlass != null ? state.config.bgGlass : 40);
@@ -912,7 +1415,7 @@ function renderInstancesTable(list) {
   const rows = list.map((a) => `
     <tr class="${a.enabled === false ? 'inst-off' : ''}">
       <td><span class="inst-name"><span class="agent-dot" style="background:${typeColor(a.type)}"></span>${esc(a.name)}${a.builtin ? '' : ' <span class="badge">custom</span>'}</span></td>
-      <td class="muted inst-path">${esc(shortPath(a.storage) || '—')}</td>
+      <td class="muted inst-path" title="${esc(a.storage || '')}">${esc(shortPath(a.storage) || '—')}</td>
       <td class="inst-status ${a.available ? 'ok' : ''}">${a.enabled === false ? esc(t('已停用')) : (a.available ? `✓ ${a.sessionCount}` : '✕')}</td>
       <td>${a.builtin
         ? `<label class="switch" title="${esc(t('启用/停用该 agent 的内置实例'))}"><input type="checkbox" data-enable="${esc(a.type)}" ${a.enabled ? 'checked' : ''}><span class="slider"></span></label>`
@@ -994,7 +1497,7 @@ function renderAbout() {
         </div>
       </div>
       <div class="about-plea">${esc(t('如果 AgentRelay 帮到了你，请在'))}
-        <a href="https://github.com/${esc(repo)}" target="_blank">${esc(t('GitHub 点个 Star'))}</a>${esc(t('，这对我们意义重大 👍'))}
+        <a href="https://github.com/${esc(repo)}" target="_blank">${esc(t('GitHub 点个 Star'))}</a>${esc(t('，这对我们意义重大'))}
         <div class="about-sub">
           <a class="btn small ghost" href="https://github.com/${esc(repo)}/issues" target="_blank">${icon('info')} ${esc(t('问题反馈'))}</a>
           <a class="btn small ghost" href="${esc(safeHref(c.sponsorUrl || SELF_SPONSOR))}" target="_blank" rel="noopener noreferrer">${icon('heart')} ${esc(t('赞助'))}</a>
@@ -1105,6 +1608,7 @@ function bindSettings() {
         language: $('#set-lang').value,
         dataDir: $('#set-datadir').value.trim(),
         backupEnabled: $('#set-backup').checked,
+        autoLoadSessions: $('#set-autoload').checked,
         fontScale: $('#set-fontscale').value,
         bgImage: $('#set-bgimage').value.trim(),
         bgGlass: Number($('#set-glass').value) || 0,
@@ -1128,14 +1632,141 @@ function bindSettings() {
   }));
   $('#relay-backup').addEventListener('change', (e) => { if (state.relay) state.relay.backup = e.target.checked; });
   // 执行按钮（此前从未绑定，点击无任何反应）
+  // 跨设备 bundle 卡锚点（接力页头部一键直达）
+  $('#btn-goto-bundle').addEventListener('click', () => {
+    document.querySelector('#relay-bundle').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  // 会话查重：按 标题+规模 跨实例分组，同组可跳转查看
+  $('#btn-dups').addEventListener('click', async () => {
+    try {
+      const r = await api('/api/session/dups');
+      const groups = r.groups || [];
+      $('#modal-title').textContent = t('会话查重') + ` — ${groups.length} ${t('组')}`;
+      $('#modal-body').innerHTML = groups.length ? groups.map((g, i) => `
+        <div class="dup-group">
+          <div class="muted">#${i + 1} · ${esc(g[0].title || '(untitled)')} · ${g.length} ${t('个重复会话')}</div>
+          ${g.map((x) => `<div class="dup-row" data-instance="${esc(x.instance)}" data-id="${esc(x.id)}">
+            <span class="sess-dot" style="background:${typeColor(x.agent)}"></span>
+            <span>${esc(typeName(x.agent) || x.agent)}</span>
+            <span class="muted">${esc(shortPath(x.cwd || ''))}</span>
+            <span class="muted">${x.msgCount ?? '?'} ${t('条')} · ${esc(fmtRelTime(x.tsLast))}</span>
+            <span class="muted">${esc(x.sub === 'subagent' ? t('子代理') : x.sub === 'fork' ? 'fork' : '')}</span>
+          </div>`).join('')}
+        </div>`).join('')
+        : `<div class="muted" style="padding:12px">${t('未发现重复会话')}</div>`;
+      $$('#modal-body .dup-row').forEach((el) => el.addEventListener('click', () => {
+        $('#modal').classList.add('hidden');
+        openDetail(el.dataset.instance, el.dataset.id);
+      }));
+      $('#modal').classList.remove('hidden');
+    } catch (e) { toast(t('加载失败: ') + e.message, 'err'); }
+  });
   $('#relay-dryrun').addEventListener('click', () => runRelay(true));
   $('#relay-run').addEventListener('click', () => runRelay(false));
+  // ---- 跨设备 bundle：导出 / 清单 / 重映射 / 导入 ----
+  let bundleData = null;
+  $('#bundle-export-sel').addEventListener('click', async () => {
+    const m = state.relay;
+    const items = [];
+    if (m) for (const [iid, set] of m.selected) for (const sid of set) items.push({ sourceInstance: iid, sessionId: sid });
+    if (!items.length) return toast(t('先在上方第 1 步选中要打包的会话'), 'warn');
+    $('#bundle-export-note').textContent = t('打包中…');
+    try {
+      const r = await api('/api/bundle/export', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, options: batchOptions(), redact: $('#bundle-redact').checked, out: $('#bundle-out').value.trim() || null }),
+      });
+      $('#bundle-export-note').innerHTML = `✓ ${r.count} ${t('个会话')} → <code class="copy-line">${esc(r.file)}</code>`;
+      toast(t('已打包'));
+    } catch (e) { $('#bundle-export-note').textContent = t('打包失败: ') + e.message; }
+  });
+  $('#bundle-inspect').addEventListener('click', async () => {
+    const f = $('#bundle-file').value.trim();
+    if (!f) return toast(t('先填写 bundle 文件路径'), 'warn');
+    try {
+      bundleData = await api('/api/bundle/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: f }) });
+      renderBundleList();
+    } catch (e) { toast(t('读取失败: ') + e.message, 'err'); }
+  });
+  function renderBundleList() {
+    const box = $('#bundle-list');
+    const cwds = [...new Set(bundleData.sessions.map((s) => s.cwd).filter(Boolean))];
+    box.innerHTML = bundleData.sessions.map((s) => `
+      <label class="check bundle-item"><input type="checkbox" class="bundle-sel" data-idx="${s.index}" checked>
+        <span class="sess-dot" style="background:${typeColor(s.agent)}"></span>
+        <span class="bundle-title">${esc(s.title)}</span>
+        <span class="muted">${esc(typeName(s.agent) || s.agent)} · ${s.entries} ${t('条')}${s.cwd ? ' · ' + esc(shortPath(s.cwd)) : ''}</span>
+      </label>`).join('') || `<div class="muted">${t('空 bundle')}</div>`;
+    $('#bundle-remap').innerHTML = cwds.length
+      ? `<div class="flabel">${t('路径重映射（源机器路径 → 本机路径；跨设备 T1 能 resume 的关键）')}</div>` + cwds.map((c) => `
+        <div class="dir-row remap-row">
+          <code class="remap-from" title="${esc(c)}">${esc(shortPath(c, 42))}</code><span class="muted">→</span>
+          <input class="input remap-to" data-cwd="${esc(c)}" data-i18n-ph="本机路径" placeholder="本机路径">
+        </div>`).join('')
+      : '';
+    $('#bundle-import-run').style.display = bundleData.sessions.length ? '' : 'none';
+  }
+  $('#bundle-import-run').addEventListener('click', async () => {
+    if (!bundleData || !bundleData.sessions.length) return;
+    const targets = [...((state.relay && state.relay.targets) || new Set())]
+      .map((iid) => state.instances.find((a) => a.id === iid))
+      .filter(Boolean).map((inst) => ({ agent: inst.type, instance: inst.id }));
+    if (!targets.length) return toast(t('先在上方第 2 步选目标 Agent'), 'warn');
+    const remap = $$('#bundle-remap .remap-to').map((inp) => inp.value.trim() ? { from: inp.dataset.cwd, to: inp.value.trim() } : null).filter(Boolean);
+    const uniCwd = $('#relay-cwd').value.trim();
+    // 复选框真实生效：只导勾选的会话（服务端 only 按下标过滤）
+    const only = $$('#bundle-list .bundle-sel').filter((c) => c.checked).map((c) => Number(c.dataset.idx));
+    if (!only.length) return toast(t('至少勾选一个要导入的会话'), 'warn');
+    const chosen = bundleData.sessions.filter((s) => only.includes(s.index));
+    if (!remap.length && !uniCwd && chosen.some((s) => s.cwd)) {
+      return toast(t('bundle 会话携带源机器路径：请填写重映射目标路径，或在上方填统一的目标项目目录'), 'warn');
+    }
+    if (!window.confirm(t('将把 bundle 中的会话写入本机目标 agent 的真实存储（写前自动备份）。确认执行？'))) return;
+    $('#bundle-import-run').disabled = true;
+    const all = [];
+    try {
+      // 逐会话导入：大会话不再长时间无反馈，进度实时更新（渲染器与接力主流程复用 resultBoxHtml）
+      for (let k = 0; k < chosen.length; k++) {
+        const s = chosen[k];
+        $('#bundle-import-note').textContent = t('导入中…') + ` ${k + 1}/${chosen.length} — ${s.title.slice(0, 40)}`;
+        try {
+          const r = await api('/api/bundle/import', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              file: $('#bundle-file').value.trim(), remap,
+              targets: targets.map((tg) => ({ ...tg, cwd: uniCwd || undefined })),
+              options: batchOptions(), backup: $('#relay-backup').checked,
+              only: [s.index],
+            }),
+          });
+          all.push(...(r.results || []));
+        } catch (e) {
+          all.push({ ok: false, error: e.message, sourceAgent: s.agent, targetAgent: targets[0].agent });
+        }
+      }
+      $('#bundle-import-note').textContent = '';
+      const resultsHtml = all.map(resultBoxHtml).join('');
+      $('#relay-results').innerHTML = resultsHtml;
+      if (state.relay) state.relay.results = resultsHtml;
+      $('#relay-results').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const ok = all.filter((x) => x.ok).length;
+      toast(`${t('导入完成')}: ${ok}/${all.length}`, ok === all.length ? '' : 'warn');
+      loadAgents(true);
+    } finally {
+      $('#bundle-import-run').disabled = false;
+    }
+  });
   $('#btn-clear-bg').addEventListener('click', () => { $('#set-bgimage').value = ''; applyBgImage(''); });
   // 背景图输入即时预览（防抖），无需先点保存
   let bgTimer = null;
   $('#set-bgimage').addEventListener('input', () => {
     clearTimeout(bgTimer);
-    bgTimer = setTimeout(() => applyBgImage($('#set-bgimage').value.trim()), 400);
+    bgTimer = setTimeout(async () => {
+      const v = $('#set-bgimage').value.trim();
+      applyBgImage(v);
+      // 即时持久化：壁纸重启后仍在（用户反馈 #3）
+      try { await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bgImage: v }) }); state.config.bgImage = v; } catch { }
+    }, 600);
   });
   $('#set-glass').addEventListener('input', () => applyGlass($('#set-glass').value));
   $('#btn-clear-log').addEventListener('click', async () => {
@@ -1220,7 +1851,40 @@ applyTheme(localStorage.getItem('ms-theme') || 'dark');
 window.applyI18n();
 function refreshDataIcons() {
   $$('[data-icon]').forEach((el) => { el.innerHTML = icon(el.dataset.icon); });
+  // 图标按钮 tooltip 本地化：EN 用词典翻译；zh 模式保留 HTML 里的原生中文 title
+  $$('[data-i18n-title]').forEach((el) => { el.title = window.t(el.getAttribute('data-i18n-title')); });
+  if (window.MS_LANG === 'en-US') {
+    $$('[data-icon-title]').forEach((el) => { const b = el.closest('button') || el; b.title = window.t(el.getAttribute('data-icon-title')); });
+  }
 }
+// 列表列/详情列拖拽调宽（中间列宽度存 localStorage）
+(function bindColResizer() {
+  const handle = $('#col-resizer');
+  if (!handle) return;
+  const saved = Number(localStorage.getItem('ms-list-w'));
+  if (saved >= 300 && saved <= 900) document.querySelector('.sessions-layout').style.setProperty('--list-w', saved + 'px');
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    handle.classList.add('dragging');
+    const layout = document.querySelector('.sessions-layout');
+    // delta 数学：起点宽 + 光标位移，任何断点/边距组合都不漂移（审核 P1）
+    const startX = e.clientX;
+    const startW = document.querySelector('.list-col').offsetWidth;
+    const move = (ev) => {
+      const w = Math.max(300, Math.min(900, Math.round(startW + (ev.clientX - startX))));
+      layout.style.setProperty('--list-w', w + 'px');
+    };
+    const up = () => {
+      handle.classList.remove('dragging');
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      const w = parseInt(layout.style.getPropertyValue('--list-w')) || 0;
+      if (w) localStorage.setItem('ms-list-w', String(w));
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
+})();
 refreshDataIcons();
 bindSettings();
 bindWizard();

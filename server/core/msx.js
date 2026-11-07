@@ -1,6 +1,6 @@
 'use strict';
 // ARX (AgentRelay eXchange) v1（内部模块名沿用 msx） —— 统一中间格式 + 选择性加载引擎
-const { estimateTokens, truncateStr } = require('./util');
+const { estimateTokens, truncateStr, nowISO } = require('./util');
 
 function blockText(b) {
   switch (b.type) {
@@ -297,8 +297,64 @@ function redactMsx(msx) {
   const cleaned = redactDeep(extra, counter);
   const title = cleaned && cleaned.title;
   const env = cleaned && cleaned.env;
-  if (counter.n > 0) msx.loss = [...(msx.loss || []), `已脱敏 ${counter.n} 处疑似秘钥/凭据`];
+    if (counter.n > 0) msx.loss = [...(msx.loss || []), `已脱敏 ${counter.n} 处疑似密钥/凭据`];
   return { ...msx, entries, source: { ...(msx.source || {}), title }, env };
+}
+
+// ---------- 会话上下文编辑 ----------
+// 把 GUI 编辑器的改动应用到 ARX：removals 删条目、edits 改写条目文本、inserts 插入新条目。
+// 插入条目形态：{afterId, entry:{role:'user'|'assistant'|'tool-result', kind?, blocks:[{type,text}|{type:'tool_use',...}|{type:'tool_result',...}], ts?}}
+// 应用后强制调用/结果配对收敛（删掉工具结果后孤儿调用自动剥离），保证目标 agent resume 不报错。
+function applySessionEdits(msx, { removals = [], edits = [], inserts = [] } = {}) {
+  const entries = (msx.entries || []).map((e) => ({ ...e, blocks: [...(e.blocks || [])] }));
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const loss = [];
+  let removed = 0, missedRemovals = 0;
+  for (const id of removals) {
+    if (!byId.has(id)) { missedRemovals++; continue; }
+    removed++;
+    entries.splice(entries.indexOf(byId.get(id)), 1);
+    byId.delete(id);
+  }
+  if (missedRemovals) loss.push(`${missedRemovals} 条待删除条目在源中已不存在（源可能已变化），已跳过`);
+  let edited = 0, missedEdits = 0;
+  for (const ed of edits) {
+    const e = byId.get(ed.id);
+    if (!e) { missedEdits++; continue; }
+    edited++;
+    e.blocks = [{ type: 'text', text: String(ed.text ?? '') }];
+    // 改写后的条目一律归位为普通用户文本条目：tool-result/note 改写后按用户内容写入
+    // （tool-result 会被写入器合并进工具 part，note/meta 会被跳过——保持原 kind 会丢内容）
+    if (e.kind !== 'text') e.kind = 'text';
+    if (e.role !== 'user' && e.role !== 'assistant') e.role = 'user';
+  }
+  if (missedEdits) loss.push(`${missedEdits} 条待改写条目在源中已不存在（源可能已变化），已跳过`);
+  let inserted = 0;
+  // 从后往前插，afterId 定位不受前面插入影响
+  for (const ins of [...(inserts || [])].reverse()) {
+    const raw = ins.entry || {};
+    // 插入条目归一化：meta/system/compaction 会被所有写入器跳过——一律转成用户文本
+    const role = raw.role === 'assistant' ? 'assistant' : 'user';
+    const blocks = Array.isArray(raw.blocks) && raw.blocks.length ? raw.blocks : [{ type: 'text', text: String(raw.text ?? '') }];
+    let id = raw.id && !byId.has(raw.id) ? raw.id : ('ins_' + Date.now().toString(36) + '_' + inserted + '_' + Math.random().toString(36).slice(2, 6));
+    const row = { id, ts: raw.ts || nowISO(), role, kind: 'text', blocks, meta: {} };
+    if (!row.blocks.length) continue;
+    inserted++;
+    if (!ins.afterId) { entries.push(row); byId.set(row.id, row); continue; }
+    const anchor = byId.get(ins.afterId);
+    if (!anchor) { loss.push('1 条插入的锚点条目已不存在，改为追加到末尾'); entries.push(row); byId.set(row.id, row); continue; }
+    entries.splice(entries.indexOf(anchor) + 1, 0, row);
+    byId.set(row.id, row);
+  }
+  let list = entries;
+  if (removed || edited || inserted) list = enforceToolPairing(list, loss);
+  return {
+    ...msx,
+    entries: list,
+    stats: computeStats(list),
+    loss: [...new Set([...(msx.loss || []), ...loss])],
+    _editSummary: { removed, edited, inserted },
+  };
 }
 
 // 最近一次 compact 边界起点的条目下标（无 compact 记录时 -1）。
@@ -320,5 +376,5 @@ function lastCompactionIndex(entries, compactions) {
 
 module.exports = {
   estimateEntryTokens, computeStats, entryPreview, firstUserText, titleFromEntries,
-  selectEntries, redactMsx, blockText, lastCompactionIndex, enforceToolPairing,
+  selectEntries, redactMsx, blockText, lastCompactionIndex, enforceToolPairing, applySessionEdits,
 };

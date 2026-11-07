@@ -29,8 +29,8 @@
     <span id="server-status" class="status-dot" title="local server"></span>
     <button class="iconbtn" id="btn-lang" title="Language">中/EN</button>
     <button class="iconbtn" id="btn-theme" title="Theme"></button>
-    <button class="iconbtn" id="btn-refresh" data-icon-title="refresh"><span data-icon="refresh"></span></button>
-    <button class="iconbtn" id="btn-shutdown" data-icon-title="shutdown" title="关闭服务（退出 AgentRelay）"><span data-icon="power"></span></button>
+    <button class="iconbtn" id="btn-refresh" data-i18n-title="刷新" title="刷新"><span data-icon="refresh"></span></button>
+    <button class="iconbtn" id="btn-shutdown" data-i18n-title="关闭服务（退出 AgentRelay）" title="关闭服务（退出 AgentRelay）"><span data-icon="power"></span></button>
   </div>
 </nav>
 
@@ -42,12 +42,17 @@
     <aside class="rail" id="agent-rail"></aside>
     <section class="list-col">
       <div class="toolbar">
-        <input id="search" class="input" type="text" data-i18n-ph="搜索标题、路径，回车全文搜索" placeholder="搜索标题、路径，回车全文搜索">
+        <div class="search-wrap">
+          <span class="search-ic" data-icon="search"></span>
+          <input id="search" class="input" type="text" data-i18n-ph="搜索标题、路径，回车全文搜索" placeholder="搜索标题、路径，回车全文搜索">
+        </div>
+        <button class="btn small ghost" id="btn-dups" data-i18n="查重" data-i18n-title="按标题+规模找重复会话（迁移测试常会产生副本）" title="按标题+规模找重复会话（迁移测试常会产生副本）">查重</button>
         <span id="list-count" class="count"></span>
       </div>
       <div id="quickstart" class="quickstart"></div>
       <div id="session-list" class="session-list"></div>
     </section>
+    <div class="col-resizer" id="col-resizer" data-i18n-title="拖动调整列表宽度" title="拖动调整列表宽度"></div>
     <section class="detail-col" id="detail-col">
       <div class="empty-detail" id="empty-detail">
         <div class="empty-glyph" data-icon="empty"></div>
@@ -65,12 +70,16 @@
       <header class="relay-head">
         <h2 data-i18n="接力">接力</h2>
         <p class="muted" data-i18n="把选中的会话写进目标 agent 的原生存储，接上就能继续干。三步：选源、选目标、执行。">把选中的会话写进目标 agent 的原生存储，接上就能继续干。三步：选源、选目标、执行。</p>
+        <button class="btn small ghost" id="btn-goto-bundle" style="margin-top:6px" data-i18n="⇄ 跨设备接力 / 批量导出（在页面底部）">⇄ 跨设备接力 / 批量导出（在页面底部）</button>
       </header>
       <div class="relay-grid">
         <section class="relay-step" id="relay-step1">
           <h3><span class="stepnum">1</span><span data-i18n="来源">来源</span></h3>
           <div id="relay-src-agents" class="chips"></div>
-          <input id="relay-src-search" class="input" type="text" data-i18n-ph="筛选会话" placeholder="筛选会话">
+          <div class="search-wrap">
+            <span class="search-ic" data-icon="search"></span>
+            <input id="relay-src-search" class="input" type="text" data-i18n-ph="筛选会话" placeholder="筛选会话">
+          </div>
           <div id="relay-src-list" class="relay-src-list"></div>
         </section>
         <section class="relay-step" id="relay-step2">
@@ -99,6 +108,32 @@
           <div id="relay-results"></div>
         </section>
       </div>
+      <section class="relay-step bundle-card" id="relay-bundle">
+        <h3><span class="stepnum">⇄</span><span data-i18n="跨设备接力（bundle）">跨设备接力（bundle）</span></h3>
+        <p class="muted" data-i18n="把会话打包成一个 .arxbundle 文件带到另一台机器导入（自动做路径重映射），实现跨设备无缝接力。文件纯本地生成，可用网盘/U盘/任意渠道传输。">把会话打包成一个 .arxbundle 文件带到另一台机器导入（自动做路径重映射），实现跨设备无缝接力。文件纯本地生成，可用网盘/U盘/任意渠道传输。</p>
+        <div class="bundle-grid">
+          <div class="bundle-col">
+            <div class="flabel" data-i18n="导出：本机 → bundle 文件">导出：本机 → bundle 文件</div>
+            <div class="dir-row">
+              <input id="bundle-out" class="input" data-i18n-ph="输出路径（留空则存到数据目录 exports）" placeholder="输出路径（留空则存到数据目录 exports）">
+            </div>
+            <label class="check"><input type="checkbox" id="bundle-redact"><span data-i18n="打包前脱敏（密钥/凭据）">打包前脱敏（密钥/凭据）</span></label>
+            <button class="btn" id="bundle-export-sel" data-i18n="把上方选中的源会话打包">把上方选中的源会话打包</button>
+            <div class="muted" id="bundle-export-note"></div>
+          </div>
+          <div class="bundle-col">
+            <div class="flabel" data-i18n="导入：bundle 文件 → 本机 agent（目标用上方第 2 步）">导入：bundle 文件 → 本机 agent（目标用上方第 2 步）</div>
+            <div class="dir-row">
+              <input id="bundle-file" class="input" data-i18n-ph="bundle 文件路径" placeholder="bundle 文件路径">
+              <button class="btn" id="bundle-inspect" data-i18n="读取清单">读取清单</button>
+            </div>
+            <div id="bundle-list" class="bundle-list"><div class="muted" style="padding:8px 0" data-i18n="读取清单后，这里会列出 bundle 内的会话">读取清单后，这里会列出 bundle 内的会话</div></div>
+            <div id="bundle-remap"></div>
+            <button class="btn primary" id="bundle-import-run" style="display:none" data-i18n="导入并接力">导入并接力</button>
+            <div class="muted" id="bundle-import-note"></div>
+          </div>
+        </div>
+      </section>
     </div>
   </section>
 
@@ -214,7 +249,7 @@
               </select></label>
             <label><span data-i18n="背景图片">背景图片</span>
               <div class="dir-row">
-                <input type="text" id="set-bgimage" placeholder="C:\pictures\bg.jpg 或 https://…">
+                <input type="text" id="set-bgimage" data-i18n-ph="C:\pictures\bg.jpg 或 https://…" placeholder="C:\pictures\bg.jpg 或 https://…">
                 <button class="btn" id="btn-clear-bg" data-i18n="清除">清除</button>
               </div>
               <span class="muted" data-i18n="填入后即时生效；留空使用纯色背景。">填入后即时生效；留空使用纯色背景。</span></label>
@@ -231,6 +266,7 @@
               </div>
               <span class="muted" data-i18n="备份、导出、缓存与日志的存放位置。修改后新文件写入新位置。">备份、导出、缓存与日志的存放位置。修改后新文件写入新位置。</span></label>
             <label class="check"><input type="checkbox" id="set-backup" checked><span data-i18n="写入前自动备份（推荐）">写入前自动备份（推荐）</span></label>
+            <label class="check"><input type="checkbox" id="set-autoload" checked><span data-i18n="启动时自动加载全部会话列表">启动时自动加载全部会话列表</span><span class="muted" data-i18n="关闭后点哪个 agent 才扫描哪个；停用的 agent 不扫描、不占资源。">关闭后点哪个 agent 才扫描哪个；停用的 agent 不扫描、不占资源。</span></label>
             <label class="check"><input type="checkbox" id="set-checkup"><span data-i18n="启动时检查新版本（请求一次 GitHub API）">启动时检查新版本（请求一次 GitHub API）</span></label>
           </div>
         </section>

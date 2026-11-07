@@ -8,6 +8,8 @@ const transferMod = require('./server/core/transfer');
 const msxMod = require('./server/core/msx');
 const { readJsonl } = require('./server/core/util');
 
+// 允许重复出现的 flag（值累积为数组）；其余 flag 后值覆盖前值
+const REPEATABLE = new Set(['from', 'to', 'remap', 'source']);
 function parseArgs(argv) {
   const args = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -18,7 +20,11 @@ function parseArgs(argv) {
       if (eq !== -1) { args[key.slice(0, eq)] = key.slice(eq + 1); continue; } // 支持 --flag=value
       const next = argv[i + 1];
       if (next === undefined || next.startsWith('--')) args[key] = true;
-      else { args[key] = next; i++; }
+      else {
+        i++;
+        if (REPEATABLE.has(key)) args[key] = args[key] === undefined ? next : [].concat(args[key], next);
+        else args[key] = next;
+      }
     } else args._.push(a);
   }
   return args;
@@ -116,6 +122,28 @@ async function route(cmd, args) {
       dbFileOverride: args['db-file'] || null, dryRun: !!args['dry-run'],
     });
     console.log(JSON.stringify(results, null, 2));
+  } else if (cmd === 'bundle') {
+    // bundle <out.arxbundle> --from agent:sessionId [--from agent:sessionId ...] [--redact] [选择性加载参数]
+    const bundleMod = require('./server/core/bundle');
+    const out = args._[1];
+    const sources = [].concat(args.from || []).filter(Boolean);
+    if (!out || !sources.length) throw new Error('用法: bundle <out.arxbundle> --from <agent>:<sessionId> [--from ...] [--redact]');
+    const items = sources.map((s) => { const i = String(s).indexOf(':'); if (i === -1) throw new Error('--from 格式: <agent>:<sessionId>'); return { sourceAgent: s.slice(0, i), sessionId: s.slice(i + 1) }; });
+    const r = await bundleMod.exportBundle({ items, options: selectionFromArgs(args), redact: !!args.redact, out });
+    console.log(`已打包 ${r.count} 个会话 → ${path.resolve(r.file)}`);
+  } else if (cmd === 'import-bundle') {
+    // import-bundle <file.arxbundle> --to agent[@cwd] [--to ...] [--remap 旧前缀=新前缀] [--dry-run]
+    const bundleMod = require('./server/core/bundle');
+    const file = args._[1];
+    const tos = [].concat(args.to || []).filter(Boolean);
+    if (!file || !tos.length) throw new Error('用法: import-bundle <file.arxbundle> --to <agent>[@<cwd>] [--to ...] [--remap 旧=新] [--dry-run]');
+    const targets = tos.map((s) => { const i = String(s).indexOf('@'); return i === -1 ? { agent: s } : { agent: s.slice(0, i), cwd: s.slice(i + 1) }; });
+    const remap = [].concat(args.remap || []).filter(Boolean).map((s) => { const i = String(s).indexOf('='); if (i === -1) throw new Error('--remap 格式: 旧路径前缀=新路径前缀'); return { from: s.slice(0, i), to: s.slice(i + 1) }; });
+    const mode = args.mode ? String(args.mode).toUpperCase() : null;
+    if (mode && !['T0', 'T1', 'T2'].includes(mode)) throw new Error('--mode 只支持 T0/T1/T2');
+    if (mode) for (const t of targets) t.mode = t.mode || mode;
+    const results = await bundleMod.importBundle({ file, remap, targets, options: selectionFromArgs(args), dryRun: !!args['dry-run'] });
+    console.log(JSON.stringify(results, null, 2));
   } else if (cmd === 'doctor') {
     console.log(JSON.stringify({
       claude: require('./server/core/claude').doctor(),
@@ -138,6 +166,8 @@ async function route(cmd, args) {
                                               [--truncate KB] [--budget tokens] [--redact]
   node cli.js load <file.arx.json>（兼容读取旧 .msx.json） --into claude|codex|zcode --cwd <项目路径> [--mode T1|T2] [--dry-run]
   node cli.js transfer --from <agent>:<sessionId> --to <agent> --cwd <路径> [--mode T0|T1|T2] [--dry-run]
+  node cli.js bundle <out.arxbundle> --from <agent>:<id> [--from ...] [--redact]   跨设备打包（多会话）
+  node cli.js import-bundle <file> --to <agent>[@<cwd>] [--remap 旧=新] [--mode T0|T1|T2] [--dry-run] 跨设备导入 + 路径重映射
   node cli.js doctor                          检查各 agent 存储
   node cli.js serve                           启动 GUI (http://127.0.0.1:17777)
   node cli.js mcp                             启动 MCP server（供 Claude Code/Codex/ZCode 等 agent 调用）

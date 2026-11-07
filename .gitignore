@@ -29,9 +29,9 @@ node_modules/
 dist/
 
 # ── 开发期一次性补丁脚本（历史产物，不属于项目本体）──────
-scripts/patch_*.py
+scripts/patch_*
 scripts/check_tpl.js
-scripts/fix_backslash.js
+scripts/fix_backslash.*
 
 # ── 未在 README 使用的截图（可能含本机日志内容）──────────
 docs/assets/logs.png
@@ -50,3 +50,9 @@ Desktop.ini
 
 # 本机验证记录（含真实会话信息，只留本地）
 VERIFICATION.md
+
+# ── 个人素材（截图/文案草稿，绝不入库）────────────────────
+clips/
+scripts/cleanup-*.js
+scripts/restore_*.js
+scripts/debug_*.js

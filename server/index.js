@@ -245,6 +245,11 @@ async function route(req, res, u) {
         list = agents.agentSummary(type).sessions || [];
       } else return send(res, 400, { error: 'instance 或 agent 必填' });
       const filtered = q ? list.filter((s) => (s.title || '').toLowerCase().includes(q) || (s.cwd || '').toLowerCase().includes(q)) : list;
+      // parent=<id>：返回该主会话的子会话（subagent / fork，zcode 等树形存储）
+      const parent = u.searchParams.get('parent');
+      if (parent) {
+        return send(res, 200, filtered.filter((s) => (s.parentId || s.forkOf) === parent || s.parent === parent));
+      }
       return send(res, 200, filtered);
     }
     if (p === '/api/session') {
@@ -298,8 +303,64 @@ async function route(req, res, u) {
         return send(res, 200, { ...msx, entries, total, offset, hasMore: offset + limit < total, previewTruncated });
       } catch (e) { return send(res, 404, { error: e.message }); }
     }
+    // 会话查重：同标题+同规模的分组（跨实例），供 GUI 呈现与清理
+    if (p === '/api/session/dups') {
+      const groups = new Map();
+      const push = (inst, list) => {
+        for (const s of list || []) {
+          const key = `${(s.title || '(无标题)').replace(/\s+/g, ' ').trim()}|${s.msgCount ?? '?'}|${s.cwd || ''}`;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push({ instance: inst.instanceId, agent: inst.type, id: s.id, title: s.title, cwd: s.cwd, msgCount: s.msgCount, tsLast: s.tsLast, sub: s.sub || 'main' });
+        }
+      };
+      for (const inst of agents.loadInstances()) {
+        try { push(inst, agents.listInstanceSessions(inst)); } catch { }
+      }
+      const dups = [...groups.values()].filter((g) => {
+        if (g.length < 2) return false;
+        // 同标题但来自不同主会话的子会话/fork 不算重复
+        const mains = g.filter((x) => x.sub === 'main');
+        return mains.length >= 2;
+      });
+      return send(res, 200, { groups: dups });
+    }
   }
   if (req.method === 'POST') {
+    // 会话上下文编辑器保存：mode 'new' = 另存为新会话（全部 agent）；'inplace' = 就地改写（claude/zcode）
+    if (p === '/api/session/save') {
+      const body = await readBody(req, res);
+      try {
+        const { instance, sessionId, edits = {}, mode = 'new' } = body;
+        if (!instance || !sessionId) return send(res, 400, { error: 'instance 与 sessionId 必填' });
+        const inst = agents.getInstance(instance);
+        if (!inst) return send(res, 400, { error: '实例不存在: ' + instance });
+        const { applySessionEdits } = require('./core/msx');
+        const src = await agents.readMsxInstance(instance, sessionId);
+        const msx = applySessionEdits(src, edits);
+        const summary = msx._editSummary || {};
+        if (!summary.removed && !summary.edited && !summary.inserted) return send(res, 400, { error: '没有任何改动' });
+        const ad = agents.ADAPTERS[inst.type];
+        if (mode === 'inplace') {
+          if (typeof ad.saveSessionInPlace !== 'function') {
+            return send(res, 400, { error: `${inst.name} 暂不支持就地编辑（请用「另存为新会话」）` });
+          }
+          const r = ad.saveSessionInPlace(sessionId, msx, { baseDir: inst.baseDir });
+          logger.info('session-edit', { instance, sessionId, mode, ...summary, backup: r.backup });
+          agents.bustListCache();
+          return send(res, 200, { ok: true, mode, id: r.id, backup: r.backup, summary, loss: r.loss || [], note: HOT_RELOAD_NOTE[inst.type] || '下次打开该会话时生效' });
+        }
+        // 另存为新会话：同 agent 原生格式写入（T1 通道）
+        if (typeof ad.writeSession !== 'function') return send(res, 400, { error: `${inst.name} 不支持原生写入` });
+        const cwd = msx.project?.cwd || null;
+        const r = await ad.writeSession(msx, { cwd, baseDir: inst.baseDir });
+        logger.info('session-edit', { instance, sessionId, mode: 'new', newId: r.id, ...summary });
+        agents.bustListCache();
+        return send(res, 200, { ok: true, mode: 'new', id: r.id, path: r.path, summary, loss: r.loss || [], note: HOT_RELOAD_NOTE[inst.type] || '新会话已写入原生存储' });
+      } catch (e) {
+        logger.error('session-edit', { error: e.message });
+        return send(res, 500, { error: e.message });
+      }
+    }
     if (p === '/api/log/clear') {
       const ok = logger.clearLog();
       if (!ok) return send(res, 500, { error: '日志清空失败' });
@@ -394,7 +455,7 @@ async function route(req, res, u) {
           patch.dataDir = path.resolve(String(body.dataDir).trim());
           require('./core/util').ensureDir(patch.dataDir);
         }
-        for (const k of ['wizardDone', 'language', 'theme', 'githubRepo', 'authorName', 'sponsorUrl', 'buyCoffeeUrl', 'checkUpdates', 'fontScale', 'bgImage', 'bgGlass']) {
+        for (const k of ['wizardDone', 'language', 'theme', 'githubRepo', 'authorName', 'sponsorUrl', 'buyCoffeeUrl', 'checkUpdates', 'fontScale', 'bgImage', 'bgGlass', 'autoLoadSessions']) {
           if (body[k] !== undefined) patch[k] = body[k];
         }
         const saved = require('./core/util').saveConfig(patch);
@@ -420,6 +481,36 @@ async function route(req, res, u) {
       const { writeMsxFile } = require('./core/transfer');
       await writeMsxFile(msx, file);
       return send(res, 200, { file, entries: msx.entries.length, tokens: msx.stats.approxTokens });
+    }
+    if (p === '/api/bundle/export') {
+      const body = await readBody(req, res);
+      try {
+        const { items, options = {}, redact = false, out = null } = body;
+        if (!Array.isArray(items) || !items.length) return send(res, 400, { error: 'items 不能为空（至少一个会话）' });
+        const r = await require('./core/bundle').exportBundle({ items, options, redact, out: out ? path.resolve(String(out)) : null });
+        logger.info('bundle-export', { file: r.file, count: r.count });
+        return send(res, 200, r);
+      } catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (p === '/api/bundle/inspect') {
+      const body = await readBody(req, res);
+      try {
+        const file = String(body.file || '').trim();
+        if (!file) return send(res, 400, { error: 'file 必填' });
+        return send(res, 200, await require('./core/bundle').inspectBundle(path.resolve(file)));
+      } catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (p === '/api/bundle/import') {
+      const body = await readBody(req, res);
+      try {
+        const { file, remap, targets, options = {}, dryRun = false, backup = null, only = null } = body;
+        if (!file || !Array.isArray(targets) || !targets.length) return send(res, 400, { error: 'file 与 targets 必填' });
+        const results = await require('./core/bundle').importBundle({ file: path.resolve(String(file)), remap, targets, options, dryRun, backup, only });
+        return send(res, 200, { results });
+      } catch (e) {
+        logger.error('api-error', { path: p, error: e.message });
+        return send(res, 500, { error: e.message });
+      }
     }
     if (p === '/api/preview' || p === '/api/transfer') {
       const body = await readBody(req, res);
@@ -454,6 +545,15 @@ function summarizeEntry(e) {
   const { entryPreview } = require('./core/msx');
   return { id: e.id, ts: e.ts, role: e.role, kind: e.kind, preview: entryPreview(e, 160), blocks: (e.blocks || []).map((b) => ({ type: b.type, name: b.name, for: b.for })) };
 }
+
+// 编辑保存后的生效时机（按 agent 而定，如实告知）
+const HOT_RELOAD_NOTE = {
+  claude: 'claude 下次 --resume / 打开该会话时读取编辑后内容；若该会话正在运行中，其退出时可能覆盖编辑',
+  zcode: 'ZCode 桌面端重新打开该会话后生效；运行中的会话以内存态为准',
+  codex: 'codex resume 该会话时生效',
+  gemini: 'gemini /resume 该会话时生效',
+  vscode: 'VS Code 重新打开该工作区的 Chat History 后可见',
+};
 
 function serveStatic(req, res, u) {
   let p = u.pathname === '/' ? '/index.html' : u.pathname;
@@ -512,6 +612,7 @@ if (require.main === module) {
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`AgentRelay GUI 已启动: http://127.0.0.1:${PORT} (v${VERSION})`);
     logger.info('server-start', { port: PORT, version: VERSION });
+    try { require('./core/hygiene').runHygiene(); } catch { } // 日志轮转 + 导出限量（硬盘卫生）
   });
   server.on('error', (e) => {
     console.error('端口占用或启动失败:', e.message);

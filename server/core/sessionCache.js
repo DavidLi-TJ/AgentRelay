@@ -14,6 +14,8 @@ function get(key) {
 
 function put(key, msx) {
   if (!msx || !Array.isArray(msx.entries) || msx.entries.length < 1500) return;
+  // 防御性上限：单会话超过 2 万条不缓存（内存友好友好，避免极端大会话驻留百 MB）
+  if (msx.entries.length > 20000) return;
   cache.set(key, { msx, at: Date.now() });
   while (cache.size > MAX) {
     const oldest = [...cache.entries()].sort((a, b) => a[1].at - b[1].at)[0];

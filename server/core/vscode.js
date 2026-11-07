@@ -225,7 +225,7 @@ async function readSession(sessionIdOrFile, baseDir) {
 
   return {
     arx: 1, id: require('./util').randomUUID(), created_at: nowISO(),
-    source: { agent: 'vscode-copilot', agent_version: copilotVersion, session_id: path.basename(file, '.jsonl'), title: title || '(无标题)', file },
+    source: { agent: AGENT, agent_version: copilotVersion, session_id: path.basename(file, '.jsonl'), title: title || '(无标题)', file },
     project: { cwd: cwd || '' },
     env: { model: null, cli_version: vscodeVersion, copilot_version: copilotVersion },
     stats, entries, compactions: [], loss,
@@ -233,4 +233,118 @@ async function readSession(sessionIdOrFile, baseDir) {
   };
 }
 
-module.exports = { listSessions, readSession, doctor };
+// ---------- T1 写入 / T0 复制 ----------
+const crypto = require('crypto');
+const { ensureDir, openJsonlWriter, writeAtomic } = require('./util');
+
+function normKey(p) {
+  return String(p || '').trim().replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+}
+
+// cwd → 已存在的 workspaceStorage/<hash>（VS Code 以 workspace.json 的 file:/// URI 记录项目）。
+// 找不到返回 null：不能凭空造 hash（VS Code 用它定位工作区），此时应改走 T2。
+function hashForCwd(cwd, baseDir) {
+  const root = storageRoot(baseDir);
+  const key = normKey(cwd);
+  try {
+    for (const h of fs.readdirSync(root)) {
+      const wj = path.join(root, h, 'workspace.json');
+      if (!fs.existsSync(wj)) continue;
+      const p = workspaceCwd(path.join(root, h));
+      if (p && normKey(p) === key) return path.join(root, h);
+    }
+  } catch { }
+  return null;
+}
+
+// ARX 条目 → Copilot Chat transcript 事件行
+function vscodeRowsFrom(entries, loss) {
+  const rows = [];
+  let prev = null;
+  let thinkLoss = false, imageLoss = false, metaSeen = false;
+  const push = (type, data, ts) => {
+    const id = crypto.randomUUID();
+    rows.push({ id, timestamp: ts || new Date().toISOString(), parentId: prev, type, data });
+    prev = id;
+  };
+  for (const e of entries) {
+    const ts = e.ts || null;
+    for (const b of e.blocks || []) if (b.type === 'image') imageLoss = true; // 用户/助手/元条目里的图片都记损
+    if (e.role === 'user' && e.kind === 'text') {
+      const txt = (e.blocks || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('');
+      if (txt.trim()) push('user.message', { content: txt, attachments: [] }, ts);
+      continue;
+    }
+    if (e.role === 'meta' || e.role === 'system') {
+      const txt = (e.blocks || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('');
+      if (txt.trim()) { metaSeen = true; push('user.message', { content: `[meta] ${txt}`, attachments: [] }, ts); }
+      continue;
+    }
+    if (e.kind === 'tool-result') {
+      const b = (e.blocks || []).find((x) => x.type === 'tool_result');
+      if (!b) continue;
+      const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+      // VS Code 原生不保存输出（仅 success 标志）；输出放非标字段 output 便于人工/未来版本读取
+      push('tool.execution_complete', { toolCallId: b.for || 'call', success: !b.isError, output: outText }, ts);
+      continue;
+    }
+    if (e.role !== 'assistant') continue;
+    for (const b of e.blocks || []) {
+      if (b.type === 'text' && b.text) push('assistant.message', { content: b.text }, ts);
+      else if (b.type === 'thinking' && b.text) thinkLoss = true;
+      else if (b.type === 'tool_use') push('tool.execution_start', { toolCallId: b.id || crypto.randomUUID(), toolName: b.name || 'tool', arguments: b.input ?? {} }, ts);
+      else if (b.type === 'image') imageLoss = true;
+    }
+  }
+  if (thinkLoss) loss.push('VS Code transcript 无思考(thinking)事件类型，思考块已省略');
+  if (imageLoss) loss.push('VS Code transcript 无图片事件类型，图片块已省略');
+  if (metaSeen) loss.push('VS Code: [meta] 条目转为用户消息');
+  if (rows.some((r) => r.type === 'tool.execution_complete' && r.data.output != null)) {
+    loss.push('工具输出写入了非标准字段 tool.execution_complete.output（官方 VS Code 不读取，仅便于人工追溯）');
+  }
+  return rows;
+}
+
+// T1：写 <hash>/GitHub.copilot-chat/transcripts/<uuid>.jsonl（transcripts 为目录扫描式 listing，落盘即可见）
+async function writeSession(msx, { cwd, baseDir } = {}) {
+  const loss = [...(msx.loss || [])]; // 继承上游（编辑器/读取器）已记录的说明
+  const entries = msx.entries || [];
+  if (!entries.length) throw new Error('没有可写入的内容条目（过滤条件排除了全部内容）');
+  if (!cwd) throw new Error('VS Code Copilot T1 注入需要目标项目 cwd');
+  const hashDir = hashForCwd(cwd, baseDir);
+  if (!hashDir) {
+    throw new Error(`在 VS Code workspaceStorage 中未找到打开过 ${cwd} 的工作区（T1 需要已存在的 workspace hash）：请先用 VS Code 打开该项目一次，或改用 T2 逐字转写注入`);
+  }
+  const newId = crypto.randomUUID();
+  const tdir = ensureDir(path.join(hashDir, 'GitHub.copilot-chat', 'transcripts'));
+  const file = path.join(tdir, `${newId}.jsonl`);
+  const rows = vscodeRowsFrom(entries, loss);
+  const w = openJsonlWriter(file);
+  w.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), parentId: null, type: 'session.start', data: { sessionId: newId, startTime: new Date().toISOString() } });
+  for (const r of rows) w.write(r);
+  await w.close();
+  return {
+    id: newId, path: file, count: rows.length, loss,
+    resumeCommand: `VS Code（打开 ${cwd}）→ Chat → History 查看「${(msx.source && msx.source.title) || newId.slice(0, 8)}」（实验性：恢复衔接行为随 VS Code 版本而异）`,
+    notes: ['写入前请完全关闭 VS Code 窗口，避免内存态回写覆盖'],
+  };
+}
+
+// T0：同源原生复制（替换 session.start 的 sessionId + 文件名；其余字节原样）
+function rawCopy(sessionId, { baseDir } = {}) {
+  for (const { dir } of chatDirs(baseDir)) {
+    for (const f of transcriptsOf(dir)) {
+      const info = scanFile(f, null);
+      if (info.id !== sessionId && path.basename(f, '.jsonl') !== sessionId) continue;
+      const newId = crypto.randomUUID();
+      const text = fs.readFileSync(f, 'utf8');
+      const replaced = info.id ? text.split(info.id).join(newId) : text;
+      const newFile = path.join(path.dirname(f), `${newId}.jsonl`);
+      writeAtomic(newFile, replaced);
+      return { id: newId, path: newFile, count: info.msgCount || 0, loss: ['T0 逐字复制：内容原样保留（仅替换会话 id）'] };
+    }
+  }
+  throw new Error(`VS Code Copilot 会话不存在: ${sessionId}`);
+}
+
+module.exports = { listSessions, readSession, doctor, writeSession, rawCopy, hashForCwd };

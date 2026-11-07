@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE) [![Node](https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org) [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg?style=flat-square)](#快速开始) [![npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-success.svg?style=flat-square)](#快速开始)
 
-[English](README.md) ｜ 简体中文 · [快速开始](#快速开始) · [支持矩阵](#支持矩阵) · [接力级别](#三种接力方式) · [FAQ](#faq)
+[English](README.md) ｜ 简体中文 · [用户指南](docs/USER-GUIDE.zh-CN.md) · [快速开始](#快速开始) · [支持矩阵](#支持矩阵) · [接力级别](#三种接力方式) · [FAQ](#faq)
 
 <img src="docs/assets/gui-overview.png" alt="AgentRelay 主界面" width="860">
 
@@ -26,10 +26,10 @@ AgentRelay 搬的是会话本身：每条消息、每次工具调用和结果、
 
 ## 功能一览
 
-- **一个页面看全所有会话**：十家 agent（Claude Code、Codex CLI、ZCode、WorkBuddy、OpenCode、DeepSeek Harness、Gemini CLI、Pi、OpenClaw、VS Code Copilot）的会话统一浏览、筛选、全文搜索，右侧逐字预览。
-- **带走多少自己定**：逐条勾选；也可以用开关批量定——思考块、工具结果、系统注入、起始条数、token 上限、秘钥正则脱敏。
+- **一个页面看全所有会话**：十一家 agent（Claude Code、Codex CLI、ZCode、WorkBuddy、OpenCode、DeepSeek Harness、Gemini CLI、Pi、OpenClaw、VS Code Copilot、Cursor）的会话统一浏览、筛选、全文搜索，右侧逐字预览。
+- **带走多少自己定**：逐条勾选；也可以用开关批量定——思考块、工具结果、系统注入、起始条数、token 上限、密钥正则脱敏。
 - **写进目标的原生存储**：合成为目标 agent 自己的会话格式并注册，`claude --resume`、`codex resume`、桌面端会话列表直接认。
-- **先备份再写入**：每次写入前做 SQLite 一致性快照（`VACUUM INTO`），保留 20 份，诊断页一键还原。
+- **先备份再写入**：任何会触碰既有数据库的写入前都做一致性快照（SQLite `VACUUM INTO`），保留 20 份，诊断页一键还原；只新建文件的接力无需备份。
 - **在 agent 里对话式接力**：内置 stdio MCP server，六个工具，Claude 或 Codex 可以在你聊天时把会话递给另一个 agent。
 
 <div align="center">
@@ -40,9 +40,14 @@ AgentRelay 搬的是会话本身：每条消息、每次工具调用和结果、
 
 Windows 10/11，Node.js 22.5 以上（为了内置的 `node:sqlite`）。零 npm 依赖，不需要 `npm install`。
 
-**双击 `StartAgentRelay.bat`**，装完事。浏览器自动打开 `http://127.0.0.1:17777`。
+```bash
+npx github:DavidLi-TJ/AgentRelay serve  # 一条命令，然后打开 http://127.0.0.1:17777
+# 或者：克隆后双击 StartAgentRelay.bat
+```
 
-首次运行向导会探测你装了哪些 agent，并实时显示各自的会话数。之后全程点鼠标：
+装完事。浏览器自动打开 `http://127.0.0.1:17777`。
+
+首次运行向导会探测你装了哪些 agent，并实时显示各自的会话数。之后全程点鼠标。每个界面怎么用，[用户指南](docs/USER-GUIDE.zh-CN.md)按实际使用顺序逐一讲了一遍：
 
 1. **会话页**：左侧选 agent，搜索框过滤，点开一场会话。右侧逐字呈现全文——文本、带输入输出的工具调用、思考块。
 2. **决定带走什么**：预览上方一排开关：思考、工具结果、系统注入、脱敏、起始条数、工具输出截断、token 上限。上限有快捷档 **1M / 512K / 200K**，也可以手输任意值。会话压缩过的话，点**「从最近 compact 起」**，从最后一次压缩边界开始接力——目标拿到的上下文，和源 agent 脑子里现在留着的一样。
@@ -59,17 +64,21 @@ Windows 10/11，Node.js 22.5 以上（为了内置的 `node:sqlite`）。零 npm
 
 | 级别 | 做法 | 保真度 |
 |---|---|---|
-| **T0 · 同源复制** | 同一 agent 内原生复制：新会话 id、重建消息链、改写 cwd。用于 Claude→Claude、Codex→Codex、ZCode→ZCode。 | 100%，`resume` 直接续 |
-| **T1 · 原生注入** | 合成为目标 agent 自己的会话格式，写入其存储并注册。 | 结构等价，内容逐字 |
-| **T2 · 逐字转写** | 把整场会话转写成结构化 transcript 写进目标项目，附新会话的启动指令。 | 内容 100% 逐字 |
+| **T0 · 同源复制** | 同一 agent 内原生复制：新会话 id、重建消息链、改写 cwd。用于 Claude→Claude、Codex→Codex、ZCode→ZCode，以及文件型 agent（Gemini、Pi、OpenClaw、VS Code Copilot、DeepSeek Harness）。 | 100%，`resume` 直接续 |
+| **T1 · 原生注入** | 合成为目标 agent 自己的会话格式，写入其存储并注册。所有支持的目标都有原生写入器。 | 结构等价，内容逐字 |
+| **T2 · 逐字转写** | 把整场会话转写成结构化 transcript 写进目标项目，附新会话的启动指令。通用兜底。 | 内容 100% 逐字 |
 
 哪个目标用哪级？接力页会标出来，规律很短：
 
 - 同一个 agent → **T0**，没有别的选择比它更好。
-- 目标是 Claude Code、Codex CLI、ZCode、WorkBuddy、OpenCode → **T1**（默认推荐），原生注入，resume 或会话列表直接出现。
-- 目标是 DeepSeek Harness、Gemini CLI、Pi、OpenClaw → **T2**，这几家还没有原生写入适配器，转写是唯一通道。
+- 其他任何支持的目标 → **T1**（默认推荐），原生注入，resume 或会话列表直接出现；实验性写入器会在界面标注。
+- **T2** 是所有 agent 的通用兜底。
 
-跨 agent 时思考块签名无法重放（需要厂商私钥），签名以原文保留并记入 `loss[]` 清单；T0 无损失。
+跨 agent 时思考块签名无法重放（需要厂商私钥），签名以原文保留并记入 `loss[]` 清单；T0 无损失。每次接力结果都带保真度清单：级别、保留的条目/工具/思考计数、转换说明条数。
+
+## 跨设备接力
+
+会话存在一台机器上，但工作会移动。把选中的会话（或整个 agent）打包成单个 `.arxbundle` 文件——纯本地 JSON 容器，不经过任何云端——用网盘/U盘/任意渠道带到另一台机器导入。因为目标 agent 把会话绑定到项目路径，导入向导会在注入前把源机器路径重映射为本机路径——这是 T1 会话在新机器上能 resume 的关键。CLI 同样支持：`node cli.js bundle out.arxbundle --from claude:<id>` 然后 `node cli.js import-bundle out.arxbundle --to codex --remap "D:/work=/Users/x/work"`。
 
 ## 支持矩阵
 
@@ -80,12 +89,33 @@ Windows 10/11，Node.js 22.5 以上（为了内置的 `node:sqlite`）。零 npm
 | ZCode | `~/.zcode/cli/db/db.sqlite` | ✓ | T0 / T1 / T2 | 桌面端会话列表 |
 | WorkBuddy | `~/.workbuddy-ai/workbuddy.db` | ✓ | T1 / T2 | 桌面端会话列表 |
 | OpenCode | `~/.local/share/opencode/opencode.db` | ✓ | T1 / T2 | 会话列表 |
-| DeepSeek Harness | `~/.dsh/sessions/`（zstd 多帧） | ✓ | T2 | 启动指令续接 |
-| Gemini CLI（实验性） | `~/.gemini/tmp/*/chats/` | ✓ | T2 | 启动指令续接 |
-| Pi / OpenClaw（实验性） | 各自 JSONL | ✓ | T2 | 启动指令续接 |
-| VS Code Copilot（实验性） | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T2 | 启动指令续接 |
+| DeepSeek Harness | `~/.dsh/sessions/`（zstd 多帧） | ✓ | T0 / T1 / T2 | 会话列表 |
+| Gemini CLI（实验性） | `~/.gemini/tmp/*/chats/` | ✓ | T0 / T1 / T2 | `gemini` `/resume` |
+| Pi / OpenClaw（实验性） | 各自 JSONL | ✓ | T0 / T1 / T2 | 会话列表 |
+| VS Code Copilot（实验性） | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T0 / T1 / T2 | Chat History |
+| Cursor（实验性） | `globalStorage/state.vscdb`（`composerData`/`bubbleId` + `composerHeaders`） | ✓ | T1 / T2 | Chat History |
 
-实验性适配器基于官方源码 schema 实现并通过合成样本测试；Trae 因会话库 SQLCipher 加密暂缓。同一个 agent 可以在设置页添加多个实例（比如两个 Claude 配置目录）。
+实验性适配器基于官方源码 schema 实现（Cursor 无导入 API，schema 来自社区逆向）并通过合成样本测试。注意：VS Code 不持久化工具输出，接力后的会话该处为占位；Cursor T1 写入时要求 Cursor 完全退出（退出时的内存态可能覆盖外部写入），写入前会快照工作区数据库；DeepSeek Harness 的 T0/T1 需要 Node ≥ 23.8 的内置 zstd（低版本界面会自动降级为 T2）。同一个 agent 可以在设置页添加多个实例（比如两个 Claude 配置目录）。
+
+## 与同类工具的对比
+
+| | AgentRelay | session-migrate | MoveZ | baton / handoff 类 |
+|---|---|---|---|---|
+| 界面 | Web GUI | CLI | 桌面应用 + CLI | CLI |
+| 迁移保真 | 逐字（T0 字节级复制、T1 原生合成） | 原生，逐路由保真表 | 原生 | 摘要式 handoff |
+| 选择性加载 | 逐条勾选、token 预算、压缩边界 | — | — | — |
+| 跨设备 | `.arxbundle` + 路径重映射 | — | 加密 bundle | 加密 paste 推送 |
+| 安全 | 自动备份 + dry-run + 保真清单 | 清单 | 备份 | — |
+| 依赖 | 0（纯 Node 内置） | Python | PHP/Vue/Electron | Go |
+| 平台 | Windows 优先 | Linux 优先 | macOS 优先 | Linux/macOS |
+
+## 编辑上下文、会话查重、子会话
+
+会话会跑偏：agent 循环输出"let me do it"式废话、工具结果污染上下文、一步走错步步错。详情页提供**编辑模式**：按关键词过滤条目、改写或删除条目、插入新内容（用户消息 / 助手回复 / 工具调用对，或粘贴从其他 agent 导出的 ARX 片段批量合并）、逐条复制原文。保存有两种方式：**就地保存**（claude 与 zcode——写回该会话自己的存储，写前自动备份，agent 下次打开该会话时生效）或**另存为新会话**（全部 agent 支持，原会话不动）。编辑是你显式发起的操作——接力仍然绝不修改源会话。
+
+三条如实说明：claude 就地保存会重新合成 transcript，格式无法往返的 sidechain/系统注入行会被丢弃（备份可还原）；编辑器能触及的是已加载的前 400 条（点**加载更多**可以继续往后）；粘贴的工具对会保持相邻——`tool_result` 离 `tool_use` 太远会让 `claude --resume` 报错。
+
+会话列表工具栏有**查重**：跨全部 agent 按"标题+规模+项目"分组找出重复会话（迁移测试最容易留下副本），点一下即可跳到对应会话。zcode 的子代理会话会显示在主会话详情的"子会话"折叠区。设置里还可以整体关闭会话列表自动加载——点哪个 agent 才扫哪个，停用的 agent 完全不碰。
 
 ## 选择性加载、压缩与大会话
 
@@ -158,7 +188,7 @@ T0 是原生复制，resume 直接续。T1 写入目标原生存储并注册。T
 server/core/    存储适配器、ARX 格式、选择器、接力编排
 server/public/  Web GUI（原生 JS，无构建步骤）
 scripts/        sandbox-test.js · e2e.js
-docs/           format-notes.md · MCP.md
+docs/           format-notes.md · MCP.md · USER-GUIDE.zh-CN.md
 ```
 
 ```bash

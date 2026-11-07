@@ -27,7 +27,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         instance: { type: 'string', description: '实例 id（来自 list_agents）；不填则按 agent 类型取第一个实例' },
-        agent: { type: 'string', description: 'agent 类型：claude | codex | zcode | workbuddy | opencode | dsh | gemini | pi | openclaw' },
+        agent: { type: 'string', description: 'agent 类型：claude | codex | zcode | workbuddy | opencode | dsh | gemini | pi | openclaw | vscode | cursor' },
         q: { type: 'string', description: '按标题/项目路径过滤' },
         limit: { type: 'number', description: '最多返回条数，默认 20' },
       },
@@ -54,7 +54,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        sourceAgent: { type: 'string', description: '源 agent 类型 claude|codex|zcode|workbuddy' },
+        sourceAgent: { type: 'string', description: '源 agent 类型（任意已接入 agent，含 dsh|gemini|pi|openclaw|vscode|cursor）' },
         sourceInstance: { type: 'string', description: '源实例 id（可选，优先于 sourceAgent）' },
         sessionId: { type: 'string' },
         targetAgent: { type: 'string' },
@@ -97,6 +97,7 @@ async function callTool(name, args = {}) {
       return textResult(agents.allInstances().map((a) => ({
         instanceId: a.id, type: a.type, name: a.name, available: a.available,
         sessionCount: a.sessionCount, storage: a.storage,
+        cap: a.cap, experimental: a.experimental,
       })));
     case 'list_sessions': {
       const iid = args.instance || null;

@@ -23,7 +23,36 @@ const codex = require('./codex');
 const zcode = require('./zcode');
 const workbuddy = require('./workbuddy');
 
-function backupTargetsFor(targetAgent, baseDir) {
+// 声明性损失（dry-run 提前告知）：写入器真实写入时才会产出 loss，这里把"由目标格式决定的、可预判的"
+// 损失在 dry-run 报告中一并声明。when(msx) 决定该条是否适用（内容里有对应块才提）。
+const hasImage = (msx) => (msx.entries || []).some((e) => (e.blocks || []).some((b) => b.type === 'image'));
+const hasThinking = (msx) => (msx.entries || []).some((e) => (e.blocks || []).some((b) => b.type === 'thinking'));
+const hasTool = (msx) => (msx.entries || []).some((e) => (e.blocks || []).some((b) => b.type === 'tool_use'));
+const DECLARED_LOSS = {
+  vscode: [
+    { when: hasThinking, note: 'VS Code transcript 无思考(thinking)事件类型，思考块将省略' },
+    { when: hasImage, note: 'VS Code transcript 无图片事件类型，图片块将省略' },
+    { when: hasTool, note: 'VS Code 不持久化工具输出，tool_result 将为占位（输出写入非标字段 output 供人工追溯）' },
+  ],
+  gemini: [
+    { when: hasImage, note: 'Gemini: 图片块需要 inlineData 原始数据，将省略' },
+  ],
+  pi: [
+    { when: hasImage, note: 'Pi: 图片块需要原始图像数据，将省略' },
+  ],
+  openclaw: [
+    { when: hasImage, note: 'OpenClaw: 图片块需要原始图像数据，将省略' },
+  ],
+  dsh: [
+    { when: hasImage, note: 'DSH: 图片块需要原始图像数据，将省略' },
+  ],
+  cursor: [
+    { when: hasImage, note: 'Cursor: 图片块需要原始图像数据，将省略' },
+    { when: hasThinking, note: 'Cursor: thinking 字段名为社区逆向推断，resume 后可能不显示思考区' },
+  ],
+};
+
+function backupTargetsFor(targetAgent, baseDir, cwd) {
   const files = [];
   if (targetAgent === 'codex') {
     const home = baseDir || path.join(require('./util').HOME, '.codex');
@@ -36,12 +65,21 @@ function backupTargetsFor(targetAgent, baseDir) {
   } else if (targetAgent === 'opencode') {
     const oc = require('./opencode');
     for (const ext of ['', '-wal', '-shm']) files.push(oc.dbPath(baseDir) + ext);
+  } else if (targetAgent === 'cursor') {
+    // 只快照目标工作区的小库（UPDATE ItemTable 的落点）。
+    // 全局库（数 GB，社区有 30GB+ 案例）的写入是纯 INSERT 新键、不触碰既有行，不做整库 VACUUM。
+    const cur = require('./cursor');
+    const hash = cwd ? cur.hashForCwd(cwd, baseDir) : null;
+    if (hash) {
+      const wsRoot = path.join(path.dirname(cur.globalDb(baseDir)), '..', 'workspaceStorage');
+      files.push(path.join(wsRoot, hash, 'state.vscdb'));
+    }
   }
   return files.filter((f) => fs.existsSync(f));
 }
 
 // 写前备份（受用户开关控制；backup===null 时取全局配置 backupEnabled，默认 true）
-function runBackupIfEnabled(targetAgent, baseDir, label, result, backupOpt) {
+function runBackupIfEnabled(targetAgent, baseDir, label, result, backupOpt, cwd) {
   const enabled = backupOpt === null || backupOpt === undefined
     ? require('./util').config().backupEnabled !== false
     : !!backupOpt;
@@ -50,7 +88,7 @@ function runBackupIfEnabled(targetAgent, baseDir, label, result, backupOpt) {
     result.notes.push('⚠ 写前备份已关闭（用户设置）——本次写入未创建快照');
     return null;
   }
-  const b = backupTargetsFor(targetAgent, baseDir);
+  const b = backupTargetsFor(targetAgent, baseDir, cwd);
   if (b.length) {
     const bk = require('./util').backupFiles(b, label);
     result.backup = bk.dir;
@@ -128,7 +166,8 @@ function writeBundleStream(msx, file) {
 }
 
 // mode: 'T0' 同源原生复制 | 'T1' 跨源原生注入 | 'T2' 逐字转写注入（通用兜底）
-async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T1', options = {}, dryRun = false, dbFileOverride = null, msxOverride = null, sourceInstance = null, targetInstance = null, backup = null }) {
+// targetBaseDir：目标 agent 数据目录覆盖（沙盒测试 / 自定义存储位置）；显式 targetInstance 优先
+async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T1', options = {}, dryRun = false, dbFileOverride = null, msxOverride = null, sourceInstance = null, targetInstance = null, targetBaseDir = null, backup = null }) {
   const t0 = Date.now();
   const result = {
     ok: false, sourceAgent, sessionId, targetAgent, mode, cwd: cwd || null, dryRun: !!dryRun,
@@ -162,7 +201,7 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
     const tgtInst = targetInstance ? agents.getInstance(targetInstance) : null;
     // 显式指定了目标实例但解析不到（已删除/停用/拼写错）：报错而不是静默写进默认存储
     if (targetInstance && !tgtInst) throw new Error('目标实例不存在: ' + targetInstance);
-    const tgtBase = tgtInst ? tgtInst.baseDir : null;
+    const tgtBase = tgtInst ? tgtInst.baseDir : (targetBaseDir || null);
     if (mode === 'T2') {
       if (!cwd) throw new Error('T2 注入需要目标项目 cwd');
       if (!dryRun) {
@@ -182,28 +221,44 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
       result.ok = true;
     } else if (mode === 'T0') {
       if (targetAgent !== sourceAgent) throw new Error('T0 仅支持同源（相同 agent）接力；跨 agent 请用 T1/T2');
-      if (!['claude', 'codex', 'zcode'].includes(targetAgent)) throw new Error(targetAgent + ' 暂不支持 T0 原生复制；请用 T1（原生注入）或 T2（逐字转写）');
+      const ad = agents.ADAPTERS[targetAgent];
+      if (!ad || typeof ad.rawCopy !== 'function' && typeof ad.copySession !== 'function') {
+        throw new Error(targetAgent + ' 暂不支持 T0 原生复制；请用 T1（原生注入）或 T2（逐字转写）');
+      }
       if (dryRun) { result.ok = true; result.notes.push('[dry-run] T0 原生复制'); return finish(); }
       if (targetAgent === 'claude') {
         const r = await claude.rawCopy(sessionId, { baseDir: tgtBase });
         result.id = r.id; result.path = r.path; result.count = r.count;
         result.resumeCommand = `claude --resume ${r.id}`;
       } else if (targetAgent === 'codex') {
-        runBackupIfEnabled('codex', tgtBase, 'codex-t0', result, backup);
+        runBackupIfEnabled('codex', tgtBase, 'codex-t0', result, backup, cwd);
         const r = await codex.rawCopy(sessionId, { baseDir: tgtBase });
         result.id = r.id; result.path = r.path; result.count = r.count;
         result.resumeCommand = `codex resume ${r.id}`;
       } else if (targetAgent === 'zcode') {
-        if (!dbFileOverride) runBackupIfEnabled('zcode', tgtBase, 'zcode-t0', result, backup);
+        if (!dbFileOverride) runBackupIfEnabled('zcode', tgtBase, 'zcode-t0', result, backup, cwd);
         const r = zcode.copySession(sessionId, { dbFile: dbFileOverride, baseDir: tgtBase });
         result.id = r.id; result.path = r.path; result.count = r.count;
         result.resumeCommand = `在 ZCode 桌面端会话列表打开「${result.title}」（新会话 id: ${r.id}）`;
+      } else {
+        // 通用文件型 T0：gemini / pi / openclaw / vscode / dsh 的 rawCopy（同源纯复制，只新建文件、无需备份）
+        const r = await ad.rawCopy(sessionId, { baseDir: tgtBase });
+        result.id = r.id; result.path = r.path; result.count = r.count;
+        // 合并读取/选择阶段累积的 loss（写入器的 T0 说明追加在后，不整体覆盖）
+        result.loss = [...(result.loss || []), ...(r.loss || [])];
+        result.resumeCommand = r.resumeCommand || `在 ${agents.META[targetAgent].name} 会话列表选择「${result.title}」（新会话 id: ${r.id}）`;
+        result.notes.push('T0 = 同源原生复制：内容原样保留（仅替换会话 id），源会话不变');
       }
       result.ok = true;
     } else if (mode === 'T1') {
       if (dryRun) {
         result.ok = true;
         result.notes.push(`[dry-run] 将以 ${targetAgent} 原生格式写入 ${describeTarget(targetAgent, cwd, tgtBase)}（${msx.stats.entries} 条 / ~${msx.stats.approxTokens} tokens）`);
+        // 声明性损失：写入器只在真实写入时才产生 loss，dry-run 把已知的格式级损失提前说清（审核 P2）
+        for (const l of DECLARED_LOSS[targetAgent] || []) {
+          const active = l.when(msx);
+          if (active) result.loss.push(l.note);
+        }
         return finish();
       }
       if (targetAgent === 'claude') {
@@ -211,7 +266,7 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
         result.id = r.id; result.path = r.path; result.loss = r.loss; result.count = r.count;
         result.resumeCommand = `claude --resume ${r.id}`;
       } else if (targetAgent === 'codex') {
-        runBackupIfEnabled('codex', tgtBase, 'codex-t1', result, backup);
+        runBackupIfEnabled('codex', tgtBase, 'codex-t1', result, backup, cwd);
         const r = codex.writeSession(msx, { cwd, baseDir: tgtBase });
         result.loss = r.loss; result.count = r.count;
         const firstUser = firstUserText(msx.entries);
@@ -229,25 +284,33 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
         result.id = r.id; result.path = r.path;
         result.resumeCommand = `codex resume ${r.id}`;
       } else if (targetAgent === 'zcode') {
-        if (!dbFileOverride) runBackupIfEnabled('zcode', tgtBase, 'zcode-t1', result, backup);
+        if (!dbFileOverride) runBackupIfEnabled('zcode', tgtBase, 'zcode-t1', result, backup, cwd);
         const r = zcode.writeSession(msx, { cwd, dbFile: dbFileOverride, baseDir: tgtBase });
         result.id = r.id; result.path = r.path; result.loss = r.loss; result.count = r.count;
         result.resumeCommand = `在 ZCode 桌面端会话列表打开「${msx.source.title}」（新会话 id: ${r.id}）`;
       } else if (targetAgent === 'workbuddy') {
-        runBackupIfEnabled('workbuddy', tgtBase, 'workbuddy-t1', result, backup);
+        runBackupIfEnabled('workbuddy', tgtBase, 'workbuddy-t1', result, backup, cwd);
         const r = await workbuddy.writeSession(msx, { cwd, baseDir: tgtBase });
         result.id = r.id; result.path = r.path; result.loss = r.loss; result.count = r.count;
         result.resumeCommand = `在 WorkBuddy 桌面端打开项目「${cwd}」的会话列表查看「${msx.source.title}」（新会话 id: ${r.id}）`;
         result.notes.push('WorkBuddy 无 CLI resume，已写入其原生 jsonl + sessions 表注册；桌面端可见后即可继续');
       } else if (targetAgent === 'opencode') {
         const oc = require('./opencode');
-        runBackupIfEnabled('opencode', tgtBase, 'opencode-t1', result, backup);
+        runBackupIfEnabled('opencode', tgtBase, 'opencode-t1', result, backup, cwd);
         const r = oc.writeSession(msx, { cwd, baseDir: tgtBase });
         result.id = r.id; result.path = r.path; result.loss = r.loss; result.count = r.count;
         result.resumeCommand = `opencode（在项目 ${cwd} 打开）→ 会话列表选择「${msx.source.title}」（新会话 id: ${r.id}）`;
         result.notes.push('OpenCode 无公开 CLI resume 语法，已写入其原生 opencode.db（session/message/part 表），桌面端/CLI 会话列表可见');
       } else {
-        throw new Error(targetAgent + ' 暂不支持 T1 原生写入；请用 T2 逐字转写注入');
+        // 通用 T1 派发：adapter 声明 writeSession 即支持（gemini/pi/openclaw/vscode/dsh/cursor）
+        const ad = agents.ADAPTERS[targetAgent];
+        if (!ad || typeof ad.writeSession !== 'function') throw new Error(targetAgent + ' 暂不支持 T1 原生写入；请用 T2 逐字转写注入');
+        runBackupIfEnabled(targetAgent, tgtBase, targetAgent + '-t1', result, backup, cwd);
+        const r = await ad.writeSession(msx, { cwd, baseDir: tgtBase });
+        result.id = r.id; result.path = r.path; result.loss = r.loss; result.count = r.count;
+        if (r.resumeCommand) result.resumeCommand = r.resumeCommand;
+        if (Array.isArray(r.notes)) result.notes.push(...r.notes);
+        result.notes.push(`${agents.META[targetAgent].name} T1 = 原生格式注入：目标 agent 会话列表直接可见（源会话不变）`);
       }
       result.ok = true;
     } else {
@@ -271,9 +334,22 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
     (result.ok ? logger.info : logger.error)('transfer', entry);
     if (!result.ok) result.hint = errorHint(result.error);
     // loss 去重 + 上限：大会话（数万条标记）可能累积出 MB 级清单，MCP/HTTP 响应都要带它
+    let omitted = 0;
     if (Array.isArray(result.loss)) {
       const uniq = [...new Set(result.loss)];
+      omitted = uniq.length;
       result.loss = uniq.length > 200 ? uniq.slice(0, 200).concat([`…另有 ${uniq.length - 200} 条同类说明`]) : uniq;
+    }
+    // 保真度清单（借鉴 session-migrate/Reinstate）：本次接力保留了什么、舍弃了什么，一个结构化对象说清。
+    // lossNotes = 去重后的转换说明条数（不是内容条数——逐条说明见 loss[]）
+    if (result.ok) {
+      result.fidelity = {
+        tier: result.mode,
+        ...(result.stats || { entries: result.count || 0 }),
+        lossNotes: omitted,
+        targetAgent: result.targetAgent,
+        experimentalTarget: !!(agents.META[result.targetAgent] && agents.META[result.targetAgent].experimental),
+      };
     }
     return result;
   }
@@ -285,6 +361,12 @@ function describeTarget(agent, cwd, baseDir) {
   if (agent === 'zcode') return '~/.zcode/cli/db/db.sqlite';
   if (agent === 'workbuddy') return '~/.workbuddy-ai/projects/ + workbuddy.db';
   if (agent === 'opencode') return (baseDir ? baseDir : '~/.local/share/opencode') + '/opencode.db';
+  if (agent === 'gemini') return '~/.gemini/tmp/<projectHash>/chats/session-*.jsonl';
+  if (agent === 'pi') return '~/.pi/agent/sessions/<cwd>/<ts>_<id>.jsonl';
+  if (agent === 'openclaw') return '~/.openclaw/agents/<agent>/sessions/<id>.jsonl';
+  if (agent === 'dsh') return '~/.dsh/sessions/<cwd编码>/<id>/session.jsonl.zstd';
+  if (agent === 'vscode') return 'workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/<uuid>.jsonl';
+  if (agent === 'cursor') return 'Cursor globalStorage/state.vscdb (composerData + bubbleId)';
   return String(cwd);
 }
 
@@ -306,7 +388,7 @@ function t2Command(targetAgent, fileName) {
 async function transfer({ sourceAgent, sessionId, targets, options = {}, dryRun = false, sourceInstance = null, backup = null }) {
   const results = [];
   for (const t of targets || []) {
-    results.push(await transferOne({ sourceAgent, sessionId, sourceInstance: t.sourceInstance || sourceInstance || null, targetAgent: t.agent, cwd: t.cwd, mode: t.mode || 'T1', options, dryRun, dbFileOverride: t.dbFileOverride || null, targetInstance: t.instance || null, backup }));
+    results.push(await transferOne({ sourceAgent, sessionId, sourceInstance: t.sourceInstance || sourceInstance || null, targetAgent: t.agent, cwd: t.cwd, mode: t.mode || 'T1', options, dryRun, dbFileOverride: t.dbFileOverride || null, targetInstance: t.instance || null, targetBaseDir: t.baseDir || null, backup }));
   }
   return results;
 }

@@ -181,8 +181,9 @@ function backupFiles(files, label = 'op') {
     if (f && fs.existsSync(f)) {
       const dest = path.join(dir, path.basename(f));
       origins[path.basename(f)] = f; // 还原时按原始路径写回（支持自定义实例目录）
-      // SQLite 活跃库：优先用 VACUUM INTO 做一致性快照（db/-wal/-shm 三件套逐个拷贝可能撕裂）
-      if (/\.sqlite$/.test(f)) {
+      // SQLite 活跃库：优先用 VACUUM INTO 做一致性快照（db/-wal/-shm 三件套逐个拷贝可能撕裂）。
+      // .vscdb（Cursor/VS Code 的 state 库）也是 SQLite，VACUUM INTO 不看扩展名
+      if (/\.(sqlite|vscdb)$/.test(f)) {
         try {
           const { DatabaseSync } = require('node:sqlite');
           const db = new DatabaseSync(f);

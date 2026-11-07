@@ -62,6 +62,9 @@ function listSessions(baseDir) {
       tsLast: r.time_updated ? msToISO(r.time_updated) : null,
       msgCount: r.msg_count, toolCalls: null, size: null,
       archived: !!r.time_archived, deleted: !!r.time_deleted, forkOf: r.parent_id || null,
+      // 子会话可见化：sess_subagent_* 是 agent 派生的 subagent 会话；其余带 parent_id 的是 fork
+      parentId: r.parent_id || null,
+      sub: String(r.id).startsWith('sess_subagent_') ? 'subagent' : (r.parent_id ? 'fork' : 'main'),
     }));
   } finally { db.close(); }
 }
@@ -397,4 +400,78 @@ function doctor(baseDir) {
   return { agent: 'zcode', ok: fs.existsSync(p), storage: p, sessionFiles: sessions, messages, appDir: path.join(HOME, '.zcode') };
 }
 
-module.exports = { listSessions, readSession, writeSession, copySession, doctor, dbPath, getReadDbFile };
+// 就地保存（上下文编辑器）：先写临时会话，成功后原子上把旧行换成本会话 id，保留原 parent/project 归属。
+// 写前 VACUUM INTO 快照备份。生效时机：ZCode 桌面端重新打开该会话后读取编辑后内容（运行中的会话以内存态为准）。
+function saveSessionInPlace(sessionId, msx, { baseDir } = {}) {
+  const target = dbPath(baseDir);
+  if (!fs.existsSync(target)) throw new Error(`ZCode 数据库不存在: ${target}`);
+  const { backupFiles } = require('./util');
+  const bk = backupFiles([target, target + '-wal', target + '-shm'].filter(fs.existsSync), 'edit-zcode');
+  const probe = new DatabaseSync(target, { readOnly: true });
+  let orig;
+  try { orig = probe.prepare('SELECT id, parent_id, project_id, directory, time_created, time_updated FROM session WHERE id = ?').get(sessionId); }
+  finally { probe.close(); }
+  if (!orig) throw new Error(`ZCode 会话不存在: ${sessionId}`);
+  const cwd = orig.directory || msx.project?.cwd;
+  const tmpId = 'sess_relaytmp_' + randomUUID();
+  // 0) 先清扫上次崩溃可能留下的临时会话（必须在写入新 tmp 之前——否则会把新 tmp 一起扫掉）
+  {
+    const sweep = new DatabaseSync(target);
+    try {
+      sweep.exec('PRAGMA busy_timeout=4000');
+      const orphans = sweep.prepare("SELECT id FROM session WHERE id LIKE 'sess_relaytmp_%'").all();
+      if (orphans.length) {
+        sweep.exec('BEGIN IMMEDIATE');
+        try {
+          for (const o of orphans) {
+            for (const t of ['part', 'message', 'session_input']) {
+              try { sweep.prepare(`DELETE FROM ${t} WHERE session_id = ?`).run(o.id); } catch { }
+            }
+            sweep.prepare('DELETE FROM session WHERE id = ?').run(o.id);
+          }
+          sweep.exec('COMMIT');
+        } catch { try { sweep.exec('ROLLBACK'); } catch { } }
+      }
+    } finally { sweep.close(); }
+  }
+  // 1) 临时会话写入（同库）；2) 原子上换 id
+  writeSession({ ...msx, project: { cwd } }, { cwd, newId: tmpId, dbFile: target });
+  const db = new DatabaseSync(target);
+  try {
+    db.exec('PRAGMA busy_timeout=4000');
+    // 换名交换：库里有若干表带 session 外键（model_usage 等，枚举不可靠），
+    // 在事务外关 FK 做受控交换；自校验在 COMMIT 之前做，失败即回滚（审核 P2）。
+    const countMsg = (sid) => db.prepare('SELECT count(*) c FROM message WHERE session_id = ?').get(sid).c;
+    const beforeMsg = countMsg(tmpId);
+    if (!beforeMsg) throw new Error('临时会话写入为空，放弃交换');
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const t of ['part', 'message', 'session_input']) {
+        db.prepare(`DELETE FROM ${t} WHERE session_id = ?`).run(sessionId);
+      }
+      db.prepare('DELETE FROM session WHERE id = ?').run(sessionId);
+      db.prepare('UPDATE session SET id = ?, parent_id = ?, project_id = ?, directory = ?, path = ?, slug = ?, time_created = ?, time_updated = ? WHERE id = ?')
+        .run(sessionId, orig.parent_id, orig.project_id, cwd, cwd, sessionId, orig.time_created, orig.time_updated, tmpId);
+      for (const t of ['message', 'part', 'session_input']) {
+        db.prepare(`UPDATE ${t} SET session_id = ? WHERE session_id = ?`).run(sessionId, tmpId);
+      }
+      // 自校验放 COMMIT 之前：不过关就回滚，绝不留下半交换状态
+      const afterMsg = countMsg(sessionId);
+      const tmpLeft = db.prepare('SELECT count(*) c FROM session WHERE id = ?').get(tmpId).c;
+      if (afterMsg !== beforeMsg || tmpLeft) throw new Error(`交换自校验失败（${beforeMsg}→${afterMsg}, 残留临时行 ${tmpLeft}）`);
+      db.exec('COMMIT');
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch { }
+      throw e;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
+    }
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { }
+    throw e;
+  } finally { db.close(); }
+  return { id: sessionId, path: target, backup: bk.dir };
+}
+
+module.exports = { listSessions, readSession, writeSession, copySession, saveSessionInPlace, doctor, dbPath, getReadDbFile };

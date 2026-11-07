@@ -148,4 +148,96 @@ function doctor(baseDir) {
   return { agent: 'pi', ok, storage: p, sessionFiles: ok ? findSessionFiles(baseDir).length : 0 };
 }
 
-module.exports = { listSessions, readSession, doctor, sessionsRoot, activeBranch, blocksFromContent };
+// ---------- T1 写入 / T0 复制 ----------
+const crypto = require('crypto');
+const { ensureDir, openJsonlWriter, writeAtomic } = require('./util');
+
+function id8() { return crypto.randomBytes(4).toString('hex'); }
+
+// ARX 条目 → Pi message 行（线性 parentId 链；toolResult 为独立 role）
+function piEntriesFrom(entries, loss) {
+  const out = [];
+  let prev = null;
+  let imageLoss = false, metaSeen = false;
+  for (const e of entries) {
+    const ts = e.ts || new Date().toISOString();
+    for (const b of e.blocks || []) if (b.type === 'image') imageLoss = true; // 用户/助手/元条目里的图片都记损
+    const push = (message) => {
+      const row = { type: 'message', id: id8(), parentId: prev, timestamp: ts, message };
+      prev = row.id;
+      out.push(row);
+    };
+    if (e.role === 'user' && e.kind === 'text') {
+      const content = (e.blocks || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('');
+      if (content) push({ role: 'user', content });
+      continue;
+    }
+    if (e.role === 'meta' || e.role === 'system') {
+      const content = (e.blocks || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('');
+      if (content) { metaSeen = true; push({ role: 'user', content: `[meta] ${content}` }); }
+      continue;
+    }
+    if (e.kind === 'tool-result') {
+      const b = (e.blocks || []).find((x) => x.type === 'tool_result');
+      if (!b) continue;
+      const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+      push({ role: 'toolResult', toolCallId: b.for || 'call', content: [{ type: 'text', text: outText }], isError: !!b.isError, output: outText });
+      continue;
+    }
+    if (e.role !== 'assistant') continue;
+    const content = [];
+    for (const b of e.blocks || []) {
+      if (b.type === 'text' && b.text) content.push({ type: 'text', text: b.text });
+      else if (b.type === 'thinking' && b.text) content.push({ type: 'thinking', thinking: b.text });
+      else if (b.type === 'tool_use') content.push({ type: 'toolCall', id: b.id || id8(), name: b.name || 'tool', arguments: b.input ?? {} });
+      else if (b.type === 'image') imageLoss = true;
+    }
+    if (content.length) push({ role: 'assistant', content, model: (e.meta && e.meta.model) || undefined, api: undefined });
+  }
+  if (imageLoss) loss.push('Pi: 图片块需要原始图像数据，注入时已省略');
+  if (metaSeen) loss.push('Pi: [meta] 条目转为带 [meta] 前缀的用户消息');
+  return out;
+}
+
+// T1：写成 Pi 原生树形 JSONL（线性链；activity 分支解析即整条链）
+async function writeSession(msx, { cwd, baseDir } = {}) {
+  const loss = [...(msx.loss || [])]; // 继承上游（编辑器/读取器）已记录的说明
+  const entries = msx.entries || [];
+  if (!entries.length) throw new Error('没有可写入的内容条目（过滤条件排除了全部内容）');
+  const newId = crypto.randomUUID();
+  const dir = ensureDir(path.join(sessionsRoot(baseDir), slugifyCwd(cwd || msx.project?.cwd || 'unknown')));
+  const stamp = Date.now();
+  const file = path.join(dir, `${stamp}_${newId.slice(0, 8)}.jsonl`);
+  const rows = piEntriesFrom(entries, loss);
+  const w = openJsonlWriter(file);
+  w.write({ type: 'session', version: 3, id: newId, timestamp: new Date().toISOString(), cwd: path.resolve(cwd || msx.project?.cwd || '.') });
+  for (const r of rows) w.write(r);
+  await w.close();
+  return {
+    id: newId, path: file, count: rows.length, loss,
+    resumeCommand: `pi（在 ${cwd} 启动）会话列表选择「${(msx.source && msx.source.title) || newId.slice(0, 8)}」`,
+  };
+}
+
+function slugifyCwd(cwd) {
+  return String(cwd || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'unknown';
+}
+
+// T0：同源原生复制（替换 header 行 id + 文件名；其余字节原样）
+function rawCopy(sessionId, { baseDir } = {}) {
+  const cryptoLocal = crypto;
+  for (const f of findSessionFiles(baseDir)) {
+    const { header, entries } = parseSessionFile(f);
+    if (header.id !== sessionId && !path.basename(f).includes(sessionId)) continue;
+    const newId = cryptoLocal.randomUUID();
+    const text = fs.readFileSync(f, 'utf8');
+    const oldId = header.id || '';
+    const replaced = oldId ? text.split(oldId).join(newId) : text;
+    const newFile = path.join(path.dirname(f), `${Date.now()}_${newId.slice(0, 8)}.jsonl`);
+    writeAtomic(newFile, replaced);
+    return { id: newId, path: newFile, count: entries.length, loss: ['T0 逐字复制：内容原样保留（仅替换会话 id）'] };
+  }
+  throw new Error(`Pi 会话不存在: ${sessionId}`);
+}
+
+module.exports = { listSessions, readSession, doctor, sessionsRoot, activeBranch, blocksFromContent, writeSession, rawCopy, slugifyCwd };

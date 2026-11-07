@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const {
-  HOME, ensureDir, readJsonl, writeJsonl, nowISO, randomUUID, msToISO, isoToMs,
+  HOME, ensureDir, readJsonl, readJsonlPartial, writeJsonl, nowISO, randomUUID, msToISO, isoToMs,
   slugifyClaude, claudeDirFor, truncateStr, estimateTokens,
 } = require('./util');
 
@@ -356,6 +356,24 @@ function findFile(sessionIdOrFile, baseDir) {
   return file;
 }
 
+// 就地保存（上下文编辑器）：同会话 id 原位重写 JSONL。写前自动备份原文件（可还原）。
+// 生效时机：claude 在下次 --resume / 打开该会话时读取编辑后的内容；若该会话正在运行中，agent 退出时可能覆盖。
+function saveSessionInPlace(sessionId, msx, { baseDir } = {}) {
+  const file = findFile(sessionId, baseDir);
+  const head = readJsonlPartial(file, 256 * 1024);
+  const cwd = (head.find((o) => o.cwd) || {}).cwd || msx.project?.cwd;
+  if (!cwd) throw new Error('无法确定会话的项目 cwd，拒绝就地保存');
+  const bk = require('./util').backupFiles([file], 'edit-claude');
+  const r = writeSession(msx, { cwd, newId: sessionId, baseDir });
+  // writeSession 按 cwd 重算落盘目录（slug 规则随历史版本变过，本机同时存在两代 slug 目录）——
+  // 落点若不是原文件位置，把产物搬回原位并清掉误建文件，否则会出现同 id 双副本（审核 P1）
+  if (path.resolve(r.path) !== path.resolve(file)) {
+    fs.copyFileSync(r.path, file);
+    fs.rmSync(r.path, { force: true });
+  }
+  return { id: sessionId, path: file, backup: bk.dir, count: r.count, loss: r.loss };
+}
+
 function doctor(baseDir) {
   const root = projectsRoot(baseDir);
   const ok = fs.existsSync(root);
@@ -369,4 +387,4 @@ function doctor(baseDir) {
   return { agent: 'claude-code', ok, storage: root, sessionFiles: files };
 }
 
-module.exports = { listSessions, readSession, writeSession, rawCopy, doctor, CLAUDE_VERSION, claudeDirFor };
+module.exports = { listSessions, readSession, writeSession, rawCopy, saveSessionInPlace, doctor, CLAUDE_VERSION, claudeDirFor };

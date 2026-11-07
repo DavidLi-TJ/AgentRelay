@@ -27,6 +27,8 @@
 
   document.addEventListener('wheel', (e) => {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.deltaMode !== 0) return;
+    if (document.body.dataset.noMomentum === '1') return; // 编辑模式：精确滚动优先于惯性
+    if (e.target && e.target.closest && e.target.closest('textarea, .insert-form, .edit-area')) return; // 表单内滚动交给原生
     if (Math.abs(e.deltaY) >= Math.abs(e.deltaX) * 2 && e.deltaX !== 0) return; // 斜向/横向滚动手势
     const el = e.target && e.target.closest ? e.target.closest(CONTAINERS) : null;
     if (!el) return;
@@ -42,8 +44,10 @@
     stop();
     box = el;
     // 立即响应完整滚距，另给一段滑行尾速；同方向连滚时叠加（封顶）
+    // 逐字预览容器（.entries）减速：阅读/编辑场景太快容易滑过目标（用户反馈）
+    const gentle = el.classList.contains('entries') ? 0.16 : 0.32;
     el.scrollTop += e.deltaY;
-    vel = Math.max(-64, Math.min(64, (sameBox ? vel : 0) * 0.5 + e.deltaY * 0.32));
+    vel = Math.max(-32, Math.min(32, (sameBox ? vel : 0) * 0.5 + e.deltaY * gentle));
     if (!raf) raf = requestAnimationFrame(glide);
   }, { passive: false });
 

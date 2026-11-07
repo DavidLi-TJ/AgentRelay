@@ -11,7 +11,9 @@ const { HOME, nowISO, truncateStr, safeParse } = require('./util');
 
 const SESSIONS_ROOT = () => path.join(HOME, '.dsh', 'sessions');
 
-function zstdDecompressAll(buf) {
+// 多帧 zstd 拼接解码。压缩字节里可能出现伪魔数导致按 4 字节魔数切错帧——解压失败时记入 sink（loss），
+// 不再静默吞掉（审核 P3：不可见内容丢失）。
+function zstdDecompressAll(buf, sink) {
   if (typeof zlib.zstdDecompressSync !== 'function') throw new Error('需要 Node ≥ 23.8 / 24 的内置 zstd 支持');
   const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
   const frames = [];
@@ -21,13 +23,17 @@ function zstdDecompressAll(buf) {
     frames.push(buf.subarray(start, next === -1 ? buf.length : next));
     start = next;
   }
-  return frames.map((f) => { try { return zlib.zstdDecompressSync(f); } catch { return Buffer.alloc(0); } })
-    .map((b) => b.toString('utf8')).join('');
+  let failed = 0;
+  const out = frames.map((f) => {
+    try { return zlib.zstdDecompressSync(f); } catch { failed++; return Buffer.alloc(0); }
+  }).map((b) => b.toString('utf8')).join('');
+  if (failed && Array.isArray(sink)) sink.push(`zstd: ${failed}/${frames.length} 帧解压失败（伪魔数或文件损坏），对应内容缺失`);
+  return out;
 }
 
-function decode(file) {
+function decode(file, sink) {
   const buf = fs.readFileSync(file);
-  return file.endsWith('.zstd') ? zstdDecompressAll(buf) : buf.toString('utf8');
+  return file.endsWith('.zstd') ? zstdDecompressAll(buf, sink) : buf.toString('utf8');
 }
 
 function findSessionFiles(baseDir) {
@@ -103,9 +109,9 @@ async function readSession(sessionId, baseDir) {
     if (s.id === sessionId || path.basename(s.dir) === sessionId) { target = s.file; break; }
   }
   if (!target) throw new Error(`DeepSeek Harness 会话不存在: ${sessionId}`);
-  const { header, events } = parseDsh(decode(target));
-  const entries = [];
   const loss = [];
+  const { header, events } = parseDsh(decode(target, loss));
+  const entries = [];
   const compactions = [];
   for (const ev of events) {
     const ts = ev.time ? new Date(ev.time).toISOString() : null;
@@ -165,4 +171,107 @@ function doctor(baseDir) {
   return { agent: 'dsh', ok, storage: p, sessionFiles: ok ? findSessionFiles(baseDir).length : 0 };
 }
 
-module.exports = { listSessions, readSession, doctor, parseDsh, decode, zstdDecompressAll, nestedText };
+// ---------- T1 写入 / T0 复制 ----------
+const crypto = require('crypto');
+const { ensureDir, writeAtomic } = require('./util');
+
+function zstdCompress(text) {
+  if (typeof zlib.zstdCompressSync !== 'function') throw new Error('需要 Node ≥ 23.8 / 24 的内置 zstd 支持（node:zlib.zstdCompressSync）');
+  return zlib.zstdCompressSync(Buffer.from(text, 'utf8'));
+}
+
+// ARX 条目 → DSH 事件序列（seq 递增；与读取端 parseDsh 的类型一一对应）
+function dshEventsFrom(entries, loss) {
+  const events = [];
+  let seq = 1;
+  let imageLoss = false, metaSeen = false;
+  const at = (ts) => ts || new Date().toISOString();
+  for (const e of entries) {
+    for (const b of e.blocks || []) if (b.type === 'image') imageLoss = true; // 用户/助手/元条目里的图片都记损
+    if (e.role === 'user' && e.kind === 'text') {
+      const content = (e.blocks || []).filter((b) => b.type === 'text').map((b) => ({ type: 'text', text: b.text || '' }));
+      if (content.length) events.push({ seq: seq++, time: at(e.ts), type: 'user/message', data: { id: e.id, content } });
+      continue;
+    }
+    if (e.role === 'meta' || e.role === 'system') {
+      const txt = (e.blocks || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('');
+      if (txt) { metaSeen = true; events.push({ seq: seq++, time: at(e.ts), type: 'user/message', data: { id: e.id, content: [{ type: 'text', text: '[meta] ' + txt }] } }); }
+      continue;
+    }
+    if (e.kind === 'tool-result') {
+      const b = (e.blocks || []).find((x) => x.type === 'tool_result');
+      if (!b) continue;
+      const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+      events.push({
+        seq: seq++, time: at(e.ts), type: 'tool/result',
+        data: { message: { source: { callId: b.for || 'call' }, toolCallId: b.for || 'call', content: [{ type: 'tool-result', toolCallId: b.for || 'call', content: [{ type: 'text', text: outText }] }], isError: !!b.isError } },
+      });
+      continue;
+    }
+    if (e.role !== 'assistant') continue;
+    const content = [];
+    for (const b of e.blocks || []) {
+      if (b.type === 'text' && b.text) content.push({ type: 'text', text: b.text });
+      else if (b.type === 'thinking' && b.text) content.push({ type: 'reasoning', text: b.text });
+      else if (b.type === 'tool_use') events.push({ seq: seq++, time: at(e.ts), type: 'tool/call', data: { callId: b.id || 'call_' + seq, name: b.name || 'tool', arguments: JSON.stringify(b.input ?? {}) } });
+      else if (b.type === 'image') imageLoss = true;
+    }
+    if (content.length) {
+      const data = { id: e.id, message: { id: e.id, content, source: { model: (e.meta && e.meta.model) || undefined } } };
+      if (e.meta && e.meta.usage) data.usage = e.meta.usage;
+      events.push({ seq: seq++, time: at(e.ts), type: 'assistant/message', data });
+    }
+  }
+  if (imageLoss) loss.push('DSH: 图片块需要原始图像数据，注入时已省略');
+  if (metaSeen) loss.push('DSH: [meta] 条目转为用户消息');
+  return events;
+}
+
+// T1：写 <root>/--<cwd编码>--/<sessionId>/session.jsonl.zstd（多帧拼接格式，这里单帧即可——解析端按魔数分帧）
+async function writeSession(msx, { cwd, baseDir } = {}) {
+  const loss = [...(msx.loss || [])]; // 继承上游（编辑器/读取器）已记录的说明
+  const entries = msx.entries || [];
+  if (!entries.length) throw new Error('没有可写入的内容条目（过滤条件排除了全部内容）');
+  const projCwd = path.resolve(cwd || msx.project?.cwd || '.');
+  const newId = crypto.randomUUID();
+  const sdir = ensureDir(path.join(baseDir || SESSIONS_ROOT(), '--' + slugifyCwd(projCwd) + '--', newId));
+  const file = path.join(sdir, 'session.jsonl.zstd');
+  const createdAt = new Date().toISOString();
+  const events = dshEventsFrom(entries, loss);
+  const lines = [
+    JSON.stringify({ type: 'session', id: newId, cwd: projCwd, createdAt, version: 1 }),
+    JSON.stringify({ seq: 0, time: createdAt, type: 'session/title', data: { title: (msx.source && msx.source.title) || '(导入会话)' } }),
+    ...events.map((e) => JSON.stringify(e)),
+  ];
+  writeAtomic(file, zstdCompress(lines.join('\n') + '\n'));
+  return {
+    id: newId, path: file, count: events.length, loss,
+    resumeCommand: `dsh（在 ${projCwd} 启动）会话列表选择「${(msx.source && msx.source.title) || newId.slice(0, 8)}」`,
+  };
+}
+
+function slugifyCwd(cwd) {
+  return String(cwd || 'unknown').replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'unknown';
+}
+
+// T0：同源原生复制（解压 → 替换会话 id → 重压缩为单帧；zstd 帧解压失败的内容无法保留，如实记 loss）
+function rawCopy(sessionId, { baseDir } = {}) {
+  for (const s of findSessionFiles(baseDir)) {
+    if (s.id !== sessionId && path.basename(s.dir) !== sessionId) continue;
+    const loss = [];
+    const { header, events } = parseDsh(decode(s.file, loss));
+    const newId = crypto.randomUUID();
+    const text = fs.readFileSync(s.file);
+    const isZ = s.file.endsWith('.zstd');
+    const plain = isZ ? zstdDecompressAll(text, loss) : text.toString('utf8');
+    const oldId = header.id || s.id;
+    const replaced = oldId ? plain.split(oldId).join(newId) : plain;
+    const sdir = ensureDir(path.join(path.dirname(path.dirname(s.file)), newId));
+    const newFile = path.join(sdir, 'session.jsonl' + (isZ ? '.zstd' : ''));
+    writeAtomic(newFile, isZ ? zstdCompress(replaced) : replaced);
+    return { id: newId, path: newFile, count: events.length, loss: [...loss, 'T0 原生复制：内容原样保留（仅替换会话 id；zstd 多帧重压缩为单帧）'] };
+  }
+  throw new Error(`DeepSeek Harness 会话不存在: ${sessionId}`);
+}
+
+module.exports = { listSessions, readSession, doctor, parseDsh, decode, zstdDecompressAll, nestedText, writeSession, rawCopy, slugifyCwd };

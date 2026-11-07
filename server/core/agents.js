@@ -16,21 +16,32 @@ const pi = require('./pi');
 const openclaw = require('./openclaw');
 const dsh = require('./dsh');
 const vscode = require('./vscode');
+const cursor = require('./cursor');
 const { lastCompactionIndex } = require('./msx');
 
+// cap = 原生接力能力（单一事实来源；transfer/GUI/CLI/MCP 均读这里，勿再散落硬编码清单）
+// t0 同源原生复制 | t1 跨源原生注入 | t2 逐字转写注入（所有 agent 通用兜底，恒 true 不单列）
 const META = {
-  claude: { id: 'claude', name: 'Claude Code', vendor: 'Anthropic', color: '#d97757', cli: 'claude' },
-  codex: { id: 'codex', name: 'Codex CLI', vendor: 'OpenAI', color: '#10a37f', cli: 'codex' },
-  zcode: { id: 'zcode', name: 'ZCode', vendor: 'Z.ai / 智谱', color: '#4f7cff', cli: 'zcode' },
-  workbuddy: { id: 'workbuddy', name: 'WorkBuddy', vendor: 'Tencent 腾讯', color: '#3c8cff', cli: null },
-  opencode: { id: 'opencode', name: 'OpenCode', vendor: 'sst (open source)', color: '#e8a33d', cli: 'opencode' },
-  gemini: { id: 'gemini', name: 'Gemini CLI', vendor: 'Google', color: '#4796e3', cli: 'gemini', experimental: true },
-  pi: { id: 'pi', name: 'Pi', vendor: 'earendil-works (open source)', color: '#c9a227', cli: 'pi', experimental: true },
-  openclaw: { id: 'openclaw', name: 'OpenClaw', vendor: 'open source', color: '#e05e3d', cli: null, experimental: true },
-  dsh: { id: 'dsh', name: 'DeepSeek Harness', vendor: 'deepseek-ai (open source)', color: '#2aa8c9', cli: 'dsh', experimental: true },
-  vscode: { id: 'vscode', name: 'VS Code Copilot', vendor: 'GitHub (open source)', color: '#8957e5', cli: null, experimental: true },
+  claude: { id: 'claude', name: 'Claude Code', vendor: 'Anthropic', color: '#d97757', cli: 'claude', cap: { t0: 1, t1: 1 } },
+  codex: { id: 'codex', name: 'Codex CLI', vendor: 'OpenAI', color: '#10a37f', cli: 'codex', cap: { t0: 1, t1: 1 } },
+  zcode: { id: 'zcode', name: 'ZCode', vendor: 'Z.ai / 智谱', color: '#4f7cff', cli: 'zcode', cap: { t0: 1, t1: 1 } },
+  workbuddy: { id: 'workbuddy', name: 'WorkBuddy', vendor: 'Tencent 腾讯', color: '#3c8cff', cli: null, cap: { t0: 0, t1: 1 } },
+  opencode: { id: 'opencode', name: 'OpenCode', vendor: 'sst (open source)', color: '#e8a33d', cli: 'opencode', cap: { t0: 0, t1: 1 } },
+  gemini: { id: 'gemini', name: 'Gemini CLI', vendor: 'Google', color: '#4796e3', cli: 'gemini', experimental: true, cap: { t0: 1, t1: 1 } },
+  pi: { id: 'pi', name: 'Pi', vendor: 'earendil-works (open source)', color: '#c9a227', cli: 'pi', experimental: true, cap: { t0: 1, t1: 1 } },
+  openclaw: { id: 'openclaw', name: 'OpenClaw', vendor: 'open source', color: '#e05e3d', cli: null, experimental: true, cap: { t0: 1, t1: 1 } },
+  dsh: { id: 'dsh', name: 'DeepSeek Harness', vendor: 'deepseek-ai (open source)', color: '#2aa8c9', cli: 'dsh', experimental: true, cap: { t0: 1, t1: 1 } },
+  vscode: { id: 'vscode', name: 'VS Code Copilot', vendor: 'GitHub (open source)', color: '#8957e5', cli: null, experimental: true, cap: { t0: 1, t1: 1 } },
+  cursor: { id: 'cursor', name: 'Cursor', vendor: 'Anysphere', color: '#6c7ee1', cli: 'cursor-agent', experimental: true, cap: { t0: 0, t1: 1 } },
 };
-const ADAPTERS = { claude, codex, zcode, workbuddy, opencode, gemini, pi, openclaw, dsh, vscode };
+const ADAPTERS = { claude, codex, zcode, workbuddy, opencode, gemini, pi, openclaw, dsh, vscode, cursor };
+
+// DSH 的 T0/T1 依赖 Node ≥23.8 的内置 zstd（写入要压缩、读取要解压）；低版本直接降级到 T2，
+// 避免 GUI 按静态 cap 推荐 T1 后才在写入时报错（审核 P2）
+if (typeof require('zlib').zstdCompressSync !== 'function') {
+  META.dsh.cap = { t0: 0, t1: 0 };
+  META.dsh.note = '本机 Node 缺少内置 zstd（需 ≥23.8），DSH 暂只能作为 T2 目标 / 只读源';
+}
 
 // ---- 实例 ----
 function loadInstances() {
@@ -82,6 +93,9 @@ function instanceSummary(inst, { sessions = false, refresh = false } = {}) {
   const out = {
     id: inst.instanceId, instanceId: inst.instanceId, type: inst.type,
     name: inst.name, baseDir: inst.baseDir, builtin: inst.builtin,
+    // 原生接力能力 + 实验性标记（META 单一事实源；GUI targetAdvice/recommendMode 读它）
+    cap: (META[inst.type] && META[inst.type].cap) || { t0: 0, t1: 0 },
+    experimental: !!(META[inst.type] && META[inst.type].experimental),
     available, storage, sessionCount: count, sessions: [],
   };
   if (inst.type === 'workbuddy') out.note = available ? null : '已安装，未发现会话';
@@ -165,13 +179,24 @@ function instancesForSettings() {
     const enabled = cfg.agents?.[type]?.enabled !== false;
     let probe = { ok: false, storage: null };
     try { probe = ADAPTERS[type].doctor(inst.baseDir); } catch { }
-    out.push({ ...inst, enabled, available: enabled && probe.ok, storage: probe.storage || null, sessionCount: counts.get(type) || 0 });
+    out.push({
+      ...inst, enabled, available: enabled && probe.ok, storage: probe.storage || null, sessionCount: counts.get(type) || 0,
+      // 能力单一事实源：设置页同样携带 cap/experimental
+      cap: (META[type] && META[type].cap) || { t0: 0, t1: 0 },
+      experimental: !!(META[type] && META[type].experimental),
+      note: META[type] && META[type].note,
+    });
   }
   for (const inst of loadInstances()) {
     if (inst.builtin) continue;
     let probe = { ok: false, storage: null };
     try { probe = ADAPTERS[inst.type].doctor(inst.baseDir); } catch { }
-    out.push({ ...inst, enabled: true, available: probe.ok, storage: probe.storage || inst.baseDir, sessionCount: counts.get(inst.instanceId) || 0 });
+    out.push({
+      ...inst, enabled: true, available: probe.ok, storage: probe.storage || inst.baseDir, sessionCount: counts.get(inst.instanceId) || 0,
+      cap: (META[inst.type] && META[inst.type].cap) || { t0: 0, t1: 0 },
+      experimental: !!(META[inst.type] && META[inst.type].experimental),
+      note: (META[inst.type] && META[inst.type].note) || null,
+    });
   }
   return out;
 }
@@ -198,7 +223,8 @@ function addCustomInstance({ type, name, dataDir }) {
       claude: 'projects 目录', codex: 'sessions 目录 / state_5.sqlite', zcode: 'cli/db/db.sqlite',
       workbuddy: 'workbuddy.db', opencode: 'opencode.db', dsh: 'sessions 目录（zstd jsonl）',
       vscode: 'workspaceStorage/*/GitHub.copilot-chat/transcripts',
-      gemini: 'tmp/*/chats 目录', pi: 'sessions 目录（jsonl）', openclaw: 'sessions 目录（jsonl）',
+      gemini: 'tmp/*/chats 目录', pi: 'sessions 目录（jsonl）', openclaw: 'agents 目录（jsonl）',
+      cursor: 'User/globalStorage/state.vscdb（Cursor 数据目录的上级）',
     }[type] || '存储目录';
     throw new Error(`在 ${abs} 下未找到 ${type} 的存储（应有 ${expect}）`);
   }

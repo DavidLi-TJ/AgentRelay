@@ -8,11 +8,15 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE) [![Node](https://img.shields.io/badge/node-%E2%89%A522.5-brightgreen.svg?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org) [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg?style=flat-square)](#quick-start) [![npm dependencies](https://img.shields.io/badge/npm%20dependencies-0-success.svg?style=flat-square)](#quick-start)
 
-English ｜ [简体中文](README.zh-CN.md) · [Quick start](#quick-start) · [Support matrix](#support-matrix) · [Relay tiers](#three-ways-to-relay) · [FAQ](#faq)
+English ｜ [简体中文](README.zh-CN.md) · [User guide](docs/USER-GUIDE.md) · [Quick start](#quick-start) · [Support matrix](#support-matrix) · [Relay tiers](#three-ways-to-relay) · [FAQ](#faq)
 
 <img src="docs/assets/gui-overview.png" alt="AgentRelay main view" width="860">
 
 </div>
+
+```bash
+npx github:DavidLi-TJ/AgentRelay serve   # zero install, zero dependencies
+```
 
 ## The problem
 
@@ -26,10 +30,10 @@ One more thing worth saying plainly: everything above happens in a browser page.
 
 ## What it does
 
-- **One page for every session.** Ten agents (Claude Code, Codex CLI, ZCode, WorkBuddy, OpenCode, DeepSeek Harness, Gemini CLI, Pi, OpenClaw, VS Code Copilot), browsable, filterable, and full-text searchable, with verbatim preview on the right.
+- **One page for every session.** Eleven agents (Claude Code, Codex CLI, ZCode, WorkBuddy, OpenCode, DeepSeek Harness, Gemini CLI, Pi, OpenClaw, VS Code Copilot, Cursor), browsable, filterable, and full-text searchable, with verbatim preview on the right.
 - **Carry only what you want.** Check entries one by one, or set the stage with toggles for thinking blocks, tool results, and system injections, a from-entry offset, a token cap, and regex-based secret redaction.
 - **Write into the target, not at it.** Relay synthesizes the target agent's own session format and registers it, so `claude --resume` / `codex resume` / the desktop session list just works.
-- **Back up first, always.** A consistent SQLite snapshot (`VACUUM INTO`) is taken before any write. Twenty are kept, and the Diagnostics page restores any of them.
+- **Back up first, always.** Any write that touches an existing database takes a consistent SQLite snapshot (`VACUUM INTO`) first; relays that only create brand-new files don't need one. Twenty are kept, and the Diagnostics page restores any of them.
 - **Relay from inside an agent.** A stdio MCP server exposes six tools, so Claude or Codex can hand a session to another agent while you talk to it.
 
 <div align="center">
@@ -38,9 +42,14 @@ One more thing worth saying plainly: everything above happens in a browser page.
 
 ## Quick start
 
-Windows 10/11, Node.js 22.5 or newer (for the built-in `node:sqlite` module). No `npm install` — there are no dependencies to install.
+Windows 10/11, Node.js 22.5 or newer (for the built-in `node:sqlite` module). No `npm install` — there are no dependencies to install. macOS/Linux: the adapters target the same `~/.` paths and should work, but they are not yet fully tested there — issues welcome.
 
-**Double-click `StartAgentRelay.bat`.** That is the whole setup. A browser window opens at `http://127.0.0.1:17777`.
+```bash
+npx github:DavidLi-TJ/AgentRelay serve  # one command, then open http://127.0.0.1:17777
+# or: double-click StartAgentRelay.bat after cloning
+```
+
+That is the whole setup. A browser window opens at `http://127.0.0.1:17777`. New here? The [user guide](docs/USER-GUIDE.md) walks through every screen in the order you'll use them.
 
 The first-run wizard detects which agents you have and shows a live session count for each. From here everything is point-and-click:
 
@@ -59,17 +68,21 @@ That is the whole workflow. The CLI (`node cli.js ...`) and the MCP server exist
 
 | Tier | What it does | Fidelity |
 |---|---|---|
-| **T0 · same-agent copy** | Native copy inside one agent with a new session id, rebuilt message chain, rewritten cwd. For Claude→Claude, Codex→Codex, ZCode→ZCode. | 100%, `resume` continues directly |
-| **T1 · native injection** | Synthesizes the target agent's own session format, writes it into the target's storage, and registers it. | Structurally equivalent, verbatim |
-| **T2 · verbatim transcript** | Writes the full session as a structured transcript into the target project plus a kickoff prompt for a new session. | Content 100% verbatim |
+| **T0 · same-agent copy** | Native copy inside one agent with a new session id, rebuilt message chain, rewritten cwd. For Claude→Claude, Codex→Codex, ZCode→ZCode, and the file-based agents (Gemini, Pi, OpenClaw, VS Code Copilot, DeepSeek Harness). | 100%, `resume` continues directly |
+| **T1 · native injection** | Synthesizes the target agent's own session format, writes it into the target's storage, and registers it. Every supported target has a native writer. | Structurally equivalent, verbatim |
+| **T2 · verbatim transcript** | Writes the full session as a structured transcript into the target project plus a kickoff prompt for a new session. Universal fallback. | Content 100% verbatim |
 
 Which tier for which target? The app marks it on the relay page, and the short version is:
 
 - Same agent → **T0**. There is no reason to use anything else.
-- Claude Code, Codex CLI, ZCode, WorkBuddy, or OpenCode as target → **T1**, the default. Native injection; resume or the session list picks it up.
-- DeepSeek Harness, Gemini CLI, Pi, or OpenClaw as target → **T2**. There is no native writer for these yet, so the transcript is the only channel.
+- Any other supported target → **T1**, the default. Native injection; resume or the session list picks it up. Experimental writers are flagged in the UI.
+- **T2** stays as the universal fallback for anything without a native writer.
 
-Cross-agent relays cannot replay thinking-block signatures (that requires the vendor's private key), so signatures are kept as plain text and noted in the `loss[]` manifest. T0 has no loss.
+Cross-agent relays cannot replay thinking-block signatures (that requires the vendor's private key), so signatures are kept as plain text and noted in the `loss[]` manifest. T0 has no loss. Every relay result carries a fidelity manifest: tier, kept entries/tools/thinking counts, and the list of omissions.
+
+## Cross-device relay
+
+Sessions live on one machine, but work moves. Export selected sessions (or a whole agent) into a single `.arxbundle` file — a plain local JSON container, no cloud involved — carry it over any drive or sync folder, and import it on the other side. Because the target agent binds sessions to project paths, the import wizard rewrites source-machine paths to the local machine (path remapping) before injecting, which is what makes a T1 session resumable on the new machine. The CLI does the same: `node cli.js bundle out.arxbundle --from claude:<id>` then `node cli.js import-bundle out.arxbundle --to codex --remap "D:/work=/Users/x/work"`.
 
 ## Support matrix
 
@@ -80,12 +93,33 @@ Cross-agent relays cannot replay thinking-block signatures (that requires the ve
 | ZCode | `~/.zcode/cli/db/db.sqlite` | ✓ | T0 / T1 / T2 | Desktop session list |
 | WorkBuddy | `~/.workbuddy-ai/workbuddy.db` | ✓ | T1 / T2 | Desktop session list |
 | OpenCode | `~/.local/share/opencode/opencode.db` | ✓ | T1 / T2 | Session list |
-| DeepSeek Harness | `~/.dsh/sessions/` (multi-frame zstd) | ✓ | T2 | Kickoff prompt |
-| Gemini CLI (experimental) | `~/.gemini/tmp/*/chats/` | ✓ | T2 | Kickoff prompt |
-| Pi / OpenClaw (experimental) | JSONL | ✓ | T2 | Kickoff prompt |
-| VS Code Copilot (experimental) | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T2 | Kickoff prompt |
+| DeepSeek Harness | `~/.dsh/sessions/` (multi-frame zstd) | ✓ | T0 / T1 / T2 | Session list |
+| Gemini CLI (experimental) | `~/.gemini/tmp/*/chats/` | ✓ | T0 / T1 / T2 | `gemini` `/resume` |
+| Pi / OpenClaw (experimental) | JSONL | ✓ | T0 / T1 / T2 | Session list |
+| VS Code Copilot (experimental) | `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` | ✓ | T0 / T1 / T2 | Chat History |
+| Cursor (experimental) | `globalStorage/state.vscdb` (`composerData`/`bubbleId` + `composerHeaders`) | ✓ | T1 / T2 | Chat History |
 
-Experimental adapters are implemented from the official source schemas and pass synthetic-sample tests; Trae is on hold because its session database is SQLCipher-encrypted. Several instances of the same agent (say, two Claude config directories) can be added in Settings.
+Experimental adapters are implemented from official source schemas (Cursor's from community reverse-engineering, since no import API exists) and pass synthetic-sample tests. Notes: VS Code does not persist tool outputs — relayed sessions carry a placeholder there; Cursor T1 requires Cursor to be fully closed while writing (its in-memory state can overwrite external edits on exit) and takes a workspace-database snapshot first; DeepSeek Harness as a native target needs the zstd built into Node ≥ 23.8 (older Nodes are auto-downgraded to T2 in the UI). Trae stays on hold: its agent database is SQLCipher-encrypted with the key generated inside Trae's own backend (a T2 relay into a Trae project still works). Several instances of the same agent (say, two Claude config directories) can be added in Settings.
+
+## How it compares
+
+| | AgentRelay | session-migrate | MoveZ | baton / handoff-style |
+|---|---|---|---|---|
+| Interface | Web GUI | CLI | Desktop app + CLI | CLI |
+| Transfer fidelity | Verbatim (T0 byte-identical, T1 native synthesis) | Native, per-route tables | Native | Summary handoff |
+| Selective loading | Per-entry checkboxes, token budget, compaction boundary | — | — | — |
+| Cross-device | `.arxbundle` + path remapping | — | Encrypted bundles | Encrypted paste push |
+| Safety | Auto-backup + dry-run + fidelity manifest | Manifest | Backup | — |
+| Dependencies | 0 (Node built-ins only) | Python | PHP/Vue/Electron | Go |
+| Platform | Windows first | Linux first | macOS first | Linux/macOS |
+
+## Edit context, find duplicates, browse sub-sessions
+
+Agent sessions drift. An agent loops on "let me do it", a tool result pollutes the context, a wrong turn poisons everything after it. The detail page has an **Edit** mode for that: filter entries by keyword, rewrite or remove entries, insert new ones (user / assistant / a tool-call pair, or paste an exported ARX fragment from another agent to batch-merge), and copy any entry verbatim. Saving offers two modes: **save in place** (claude and zcode — writes the session's own storage, auto-backup first, takes effect the next time that agent opens the session) or **save as a new session** (every agent, original untouched). Editing is your explicit action — relays still never modify a source session.
+
+Three honest caveats: an in-place claude save re-synthesizes the transcript, so sidechain/system-injection lines that the format cannot round-trip are dropped (the backup is the recovery); the editor reaches the first 400 loaded entries (click **Load more** to bring further ones in); and a pasted tool pair is kept adjacent for exactly this reason — a `tool_result` far from its `tool_use` makes `claude --resume` fail.
+
+The sessions toolbar has a **duplicate finder**: sessions with the same title, size and project across all agents are grouped (migration testing leaves copies behind), one click jumps to each. Sub-agent sessions (zcode) show up under their parent in the detail view. And a settings switch turns auto-loading of session lists off entirely — click an agent to scan it on demand, disabled agents are never touched.
 
 ## Selective loading, compaction, and big sessions
 
@@ -158,7 +192,7 @@ If AgentRelay saved you some time, a coffee is always appreciated:
 server/core/    storage adapters, ARX format, selector, relay orchestration
 server/public/  web GUI (vanilla JS, no build step)
 scripts/        sandbox-test.js · e2e.js
-docs/           format-notes.md · MCP.md
+docs/           format-notes.md · MCP.md · USER-GUIDE.md
 ```
 
 ```bash
