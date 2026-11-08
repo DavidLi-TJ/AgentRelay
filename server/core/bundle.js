@@ -244,6 +244,9 @@ async function importBundle({ file, remap, targets, options = {}, dryRun = false
         let mode = t.mode || 'T1';
         let coerced = false;
         if (mode === 'T0') { mode = 'T1'; coerced = true; }
+        // 目标不支持 T1（如豆包）时降级 T2 并说明——dry-run 的承诺必须与真实执行一致（审计 P2-1）
+        const capT1 = agents.META[t.agent] && agents.META[t.agent].cap && agents.META[t.agent].cap.t1;
+        if (mode === 'T1' && !capT1) { mode = 'T2'; coerced = true; }
         const r = await transfer.transferOne({
           sourceAgent: srcAgent, sessionId: msx.source?.session_id || msx.id,
           targetAgent: t.agent, cwd: t.cwd || remapped || null, mode,

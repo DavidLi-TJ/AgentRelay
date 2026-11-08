@@ -5,6 +5,7 @@
 // 格式: {id,parentId,timestamp(ms),type:'message'|'function_call'|'function_call_result'|'reasoning'|'ai-title'|'session-meta',...}
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
 const {
   HOME, cacheDir, ensureDir, nowISO, randomUUID, isoToMs, msToISO,
@@ -26,7 +27,7 @@ function openDb(dbFile, baseDir) {
   const src = dbFile || dbPath(baseDir);
   if (dbFile) return new DatabaseSync(dbFile);
   ensureDir(cacheDir());
-  const dest = path.join(cacheDir(), 'workbuddy-read-copy.db');
+  const dest = path.join(cacheDir(), 'workbuddy-read-' + crypto.createHash('md5').update(String(src)).digest('hex').slice(0, 8) + '.db');
   for (const ext of ['', '-wal', '-shm']) {
     const s = src + ext;
     if (fs.existsSync(s)) fs.copyFileSync(s, dest + ext);

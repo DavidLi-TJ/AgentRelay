@@ -338,7 +338,7 @@ async function route(req, res, u) {
         // 优先按备份时的原始路径还原（meta.json，支持自定义实例目录）；老备份回落默认路径。
         // meta.json 是备份目录内的普通文件（可能被伪造）：目标文件名必须命中已知存储文件白名单，
         // 否则一次"还原"就能把任意内容写到任意路径（如启动目录）。
-        const ALLOWED = new Set(['db.sqlite', 'opencode.db', 'state_5.sqlite', 'workbuddy.db', 'session_index.jsonl']);
+        const ALLOWED = new Set(['db.sqlite', 'opencode.db', 'state_5.sqlite', 'workbuddy.db', 'session_index.jsonl', 'database.db']);
         let targets = null;
         try {
           const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));

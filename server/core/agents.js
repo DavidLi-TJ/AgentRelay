@@ -171,7 +171,15 @@ async function readMsxInstance(instanceId, sessionId) {
   const inst = getInstance(instanceId);
   if (!inst) throw new Error(`agent 实例不存在: ${instanceId}`);
   if (!ADAPTERS[inst.type].readSession) throw new Error(`agent ${inst.type} 暂不支持读取`);
-  return callReadSession(inst.type, ADAPTERS[inst.type], sessionId, inst.baseDir);
+  // 短 id 前缀展开（与 readMsx 行为对齐）：本实例内唯一命中即用
+  let sid = String(sessionId);
+  if (sid.length <= 16) {
+    const full = new Set();
+    try { for (const s of listInstanceSessions(inst)) { if (s.id === sid || s.id.startsWith(sid)) full.add(s.id); } } catch { }
+    if (full.size === 1) sid = [...full][0];
+    else if (full.size > 1) throw new Error(`id 前缀 "${sid}" 命中 ${full.size} 个会话，请提供更长的前缀或完整 id`);
+  }
+  return callReadSession(inst.type, ADAPTERS[inst.type], sid, inst.baseDir);
 }
 
 // 旧接口：按类型读取。先试第一个实例，找不到再遍历其余实例（跨实例找回会话）
@@ -272,7 +280,7 @@ function addCustomInstance({ type, name, dataDir }) {
       gemini: 'tmp/*/chats 目录', pi: 'sessions 目录（jsonl）', openclaw: 'agents 目录（jsonl）',
       doubao: 'User Data 目录（豆包桌面端，仅 T2 目标）',
       hermes: 'state.db（Hermes Agent 数据目录，如 %LOCALAPPDATA%\\hermes 或 HERMES_HOME）',
-      trae: 'database.db（Trae 数据目录 ModularData/ai-agent；只读源）',
+      trae: 'database.db（Trae 数据目录 ModularData/ai-agent）',
       cursor: 'User/globalStorage/state.vscdb（Cursor 数据目录的上级）',
     }[type] || '存储目录';
     throw new Error(`在 ${abs} 下未找到 ${type} 的存储（应有 ${expect}）`);

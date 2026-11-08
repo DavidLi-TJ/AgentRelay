@@ -2,7 +2,7 @@
 // 硬盘卫生：日志轮转 + 导出目录限量（用户需求 #9；随服务启动执行一次）
 const fs = require('fs');
 const path = require('path');
-const { dataDir, exportsDir } = require('./util');
+const { dataDir, exportsDir, cacheDir } = require('./util');
 const logger = require('./logger');
 
 const LOG_MAX = 5 * 1024 * 1024;   // log.jsonl 上限 5MB，超了保留尾部 2MB
@@ -50,9 +50,27 @@ function pruneExports() {
   } catch { }
 }
 
+// trae 解密缓存清理：每份可达数百 MB（明文副本），每库只保留最新 2 份
+function pruneTraeCache() {
+  const dir = cacheDir();
+  try {
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir).filter((f) => f.startsWith('trae-dec-') && f.endsWith('.db')).map((f) => {
+      const p = path.join(dir, f);
+      const st2 = fs.statSync(p);
+      return { p, m: st2.mtimeMs, isFile: st2.isFile() };
+    }).filter((x) => x.isFile)
+      .sort((a, b) => (b.m - a.m) || b.p.localeCompare(a.p));
+    for (const x of files.slice(2)) {
+      try { fs.rmSync(x.p, { force: true }); } catch { }
+    }
+  } catch { }
+}
+
 function runHygiene() {
   rotateLog();
   pruneExports();
+  pruneTraeCache();
 }
 
 module.exports = { runHygiene, rotateLog, pruneExports };

@@ -1,14 +1,16 @@
 'use strict';
-// Trae（字节 IDE，VS Code 系）只读适配器 —— SQLCipher 4 页面级解密，零 npm 依赖
+// Trae（字节 IDE，VS Code 系）适配器 —— SQLCipher 4 页面级加解密，零 npm 依赖
 // 方法来源（均 MIT，独立验证）：Oh-My-Trae/trae-db-decrypt、ZedeX/trae-chat-decrypt
 // 密钥不在磁盘：由 ai-agent.dll 运行时生成，仅存于进程内存 → PowerShell P/Invoke 扫描
-// （页 1 HMAC-SHA512 校验防误报，Node 侧二次校验），因此 **读取时 Trae 必须正在运行**
+// （页 1 HMAC-SHA512 校验防误报，Node 侧二次校验），因此 **密钥提取时 Trae 必须正在运行**；
+// 读取可用缓存快照（Trae 关闭后仍可读，源库更新后标记 stale）；写入/复制要求 Trae 完全退出
 // 解密参数（SQLCipher 4）：AES-256-CBC、页 4096、salt=页 1 前 16 字节、reserve=80（IV16+HMAC64）
 // 读：chat_session（会话）+ history_v2（完整聊天 JSON raw_messages）
-// 写：decrypt-modify-reencrypt 公开世界无先例、WAL/原子性风险高 → 目标侧维持 T2 转写
+// 写：decrypt → 明文库修改（node:sqlite）→ 整库重加密 → 原子替换（写前自动备份）
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { DatabaseSync } = require('node:sqlite');
 const { HOME, cacheDir, ensureDir, nowISO, truncateStr } = require('./util');
 
 const AGENT = 'trae';
@@ -164,7 +166,9 @@ function scanKeyViaPowerShell(dbPath, page1) {
 
 // 解密缓存：按源库 mtime+size 命名，Trae 未写盘时复用
 function plainCachePath(dbPath, st) {
-  return path.join(cacheDir(), `trae-dec-${path.basename(path.dirname(path.dirname(dbPath)))}-${st.size}-${Math.round(st.mtimeMs)}.db`);
+  // 库路径哈希做区分符（CN/国际版/SOLO 的 dirname 同为 ModularData，仅靠 size+mtime 会潜伏碰撞）
+  const tag = crypto.createHash('md5').update(dbPath).digest('hex').slice(0, 8);
+  return path.join(cacheDir(), `trae-dec-${tag}-${st.size}-${Math.round(st.mtimeMs)}.db`);
 }
 
 function getPlainDb(dbPath) {
@@ -281,7 +285,7 @@ function traeRunning() {
     const { execSync } = require('child_process');
     const out = execSync('powershell -NoProfile -Command "(Get-Process | Where-Object { $_.Name -like \'Trae*\' } | Measure-Object).Count"', { timeout: 30000, encoding: 'utf8' });
     return parseInt(String(out).trim(), 10) > 0;
-  } catch { return false; }
+  } catch { return true; } // fail-closed：状态未知时按运行中处理，阻止对活跃库的写入
 }
 
 // 在明文库上注册会话（T0 克隆与 T1 注入共用）：列集合运行时探测，cwd → project.absolute_path 反查 project_id
@@ -350,8 +354,10 @@ function copySession(sessionId, { baseDir } = {}) {
   const got = getPlainDb(encDb);
   const plainFile = got.dbFile, salt = got.salt, encKey = got.encKey;
   if (got.stale) throw new Error('Trae 数据已有更新而本地无当前密钥——请启动 Trae（打开 AI 面板）后重试，以基于最新数据写入');
+  if (fs.existsSync(encDb + '-wal')) throw new Error('检测到未合并的 WAL 日志（Trae 可能异常退出）：请启动并正常退出 Trae 以合并日志后重试，否则写入会损坏数据库');
   if (isDefaultRealDb(baseDir, encDb) && traeRunning()) throw new Error('检测到 Trae 正在运行：请先完全退出 Trae 再执行（密钥已在本会话缓存，退出后直接重试即可）');
   if (!got.decrypted) throw new Error('Trae 目标库已是明文（未加密），该路径未实现——请确认指向的是加密的 database.db');
+  if (!encKey) throw new Error('本会话尚未提取到密钥：请先启动 Trae（打开 AI 面板）并执行一次 Dry-run 以提取密钥，然后退出 Trae 重试写入');
   const db = new DatabaseSync(plainFile);
   let newSid = null, count = 0;
   try {
@@ -362,12 +368,18 @@ function copySession(sessionId, { baseDir } = {}) {
     db.exec('BEGIN IMMEDIATE');
     try {
       const sCols = db.prepare('PRAGMA table_info("chat_session")').all().map((c) => c.name);
+      // 剔除自增 PK（chat_session.id INTEGER PRIMARY KEY）——原样保留会撞唯一约束（审计 P1-2）
+      const autoPk = new Set(db.prepare('PRAGMA table_info("chat_session")').all().filter((c) => c.pk > 0 && /INT/i.test(c.type || '')).map((c) => c.name));
       const row = { ...src, session_id: newSid };
-      const names = sCols.filter((n) => row[n] !== undefined);
+      const names = sCols.filter((n) => row[n] !== undefined && !autoPk.has(n));
       db.prepare(`INSERT INTO chat_session (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`).run(...names.map((n) => row[n]));
       const hCols = db.prepare('PRAGMA table_info("history_v2")').all().map((c) => c.name).filter((n) => n !== 'id');
       const rows = db.prepare(`SELECT ${hCols.map((n) => '"' + n + '"').join(',')} FROM history_v2 WHERE session_id = ? ORDER BY id`).all(sessionId);
-      for (const r of rows) { insertRowPlain(db, 'history_v2', hCols, { ...r, session_id: newSid }); count++; }
+      for (const r of rows) {
+        // history_v2_id 有唯一索引：克隆行必须重新生成（审计 P1-2）
+        insertRowPlain(db, 'history_v2', hCols, { ...r, session_id: newSid, history_v2_id: 'h_' + crypto.randomBytes(16).toString('hex') });
+        count++;
+      }
       try {
         const sp = db.prepare('SELECT * FROM session_project WHERE session_id = ?').get(sessionId);
         if (sp) {
@@ -383,6 +395,7 @@ function copySession(sessionId, { baseDir } = {}) {
   const tmpOut = encDb + '.new-' + process.pid;
   encryptDb(plainFile, tmpOut, encKey, salt);
   fs.renameSync(tmpOut, encDb);
+  for (const ext of ['-wal', '-shm']) { try { fs.rmSync(encDb + ext, { force: true }); } catch { } } // 旧 WAL 帧重放会覆盖注入内容，必须清除
   try { fs.rmSync(plainFile, { force: true }); } catch { }
   return { id: newSid, path: encDb, count, backup: bk.dir, resumeCommand: `Trae（重新打开）会话列表选择「${src.session_title || newSid.slice(0, 8)}」` };
 }
@@ -399,7 +412,9 @@ function writeSession(msx, { cwd, baseDir } = {}) {
   const got = getPlainDb(encDb);
   const plainFile = got.dbFile, salt = got.salt, encKey = got.encKey;
   if (got.stale) throw new Error('Trae 数据已有更新而本地无当前密钥——请启动 Trae（打开 AI 面板）后重试，以基于最新数据写入');
+  if (fs.existsSync(encDb + '-wal')) throw new Error('检测到未合并的 WAL 日志（Trae 可能异常退出）：请启动并正常退出 Trae 以合并日志后重试，否则写入会损坏数据库');
   if (isDefaultRealDb(baseDir, encDb) && traeRunning()) throw new Error('检测到 Trae 正在运行：注入前请先完全退出 Trae（密钥已在本会话缓存，退出后直接重试即可）');
+  if (!encKey) throw new Error('本会话尚未提取到密钥：请先启动 Trae（打开 AI 面板）并执行一次 Dry-run 以提取密钥，然后退出 Trae 重试写入');
   const loss = [...(msx.loss || [])];
   const entries = msx.entries || [];
   if (!entries.length) throw new Error('没有可写入的内容条目（过滤条件排除了全部内容）');
@@ -420,6 +435,7 @@ function writeSession(msx, { cwd, baseDir } = {}) {
   const tmpOut = encDb + '.new-' + process.pid;
   encryptDb(plainFile, tmpOut, encKey, salt);
   fs.renameSync(tmpOut, encDb);
+  for (const ext of ['-wal', '-shm']) { try { fs.rmSync(encDb + ext, { force: true }); } catch { } } // 旧 WAL 帧重放会覆盖注入内容，必须清除
   try { fs.rmSync(plainFile, { force: true }); } catch { }
   return {
     id: newSid, path: encDb, count: entries.length, loss,
@@ -495,8 +511,29 @@ async function readSession(sessionId, baseDir) {
         for (const b of content) {
           if (b.type === 'text' && b.text) blocks.push({ type: 'text', text: b.text });
           else if ((b.type === 'thinking' || b.type === 'think') && (b.text || b.thinking)) blocks.push({ type: 'thinking', text: b.text || b.thinking || '' });
-          else if (b.type === 'tool_use' || b.type === 'tool_call') blocks.push({ type: 'tool_use', id: b.id || b.tool_call_id || 'call_' + randomId(), name: b.name || b.tool_name || 'tool', input: safe(b.arguments ?? b.input ?? {}) });
+          else if (b.type === 'tool_use' || b.type === 'toolCall') blocks.push({ type: 'tool_use', id: b.id || b.call_id || 'call_' + randomId(), name: b.name || b.function?.name || b.tool_name || 'tool', input: safe(b.arguments ?? b.input ?? b.function?.arguments ?? {}) });
           else if (b.type === 'tool_result' || b.type === 'tool_output') blocks.push({ type: 'tool_result', for: b.tool_call_id || b.id || 'call', output: typeof (b.output ?? b.content) === 'string' ? (b.output ?? b.content) : JSON.stringify(b.output ?? b.content ?? ''), isError: !!b.is_error });
+        }
+        // 真实形态：assistant 的工具调用在 message 级 tool_calls（OpenAI function_call 风格），content 常为空
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+          for (const c of m.tool_calls) {
+            const fn = c.function_call || c.function || {};
+            let input = {};
+            try { input = typeof fn.arguments === 'string' ? JSON.parse(fn.arguments) : (fn.arguments ?? {}); } catch { input = { raw: fn.arguments }; }
+            blocks.push({ type: 'tool_use', id: c.id || c.call_id || 'call_' + randomId(), name: fn.name || 'tool', input });
+          }
+          const em = m.extra_info || {};
+          if (!env.model && (em.model || em.model_name)) env.model = em.model_name || em.model;
+        }
+        // 真实形态：role='tool' 的执行结果，正文带 <toolcall_status>/<toolcall_result>/<toolcall_error_message> 包装
+        let toolResult = null;
+        if (m.role === 'tool') {
+          const fullText = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+          const statusM = fullText.match(/<toolcall_status>([\s\S]*?)<\/toolcall_status>/);
+          const errMsgM = fullText.match(/<toolcall_error_message>([\s\S]*?)<\/toolcall_error_message>/);
+          const resultM = fullText.match(/<toolcall_result>([\s\S]*?)<\/toolcall_result>/);
+          const output = resultM ? resultM[1].trim() : (errMsgM ? fullText : fullText.trim());
+          toolResult = { for: m.tool_call_id || 'call', output, isError: (statusM && statusM[1].trim() !== 'done') || !!errMsgM };
         }
         // history_v2 可能为同一条消息保留多行快照：按 role+内容指纹去重
         const fp = m.role + '|' + JSON.stringify(blocks);
@@ -505,11 +542,14 @@ async function readSession(sessionId, baseDir) {
         if (m.role === 'user' && blocks.some((b) => b.type === 'text')) {
           entries.push({ id: 'h' + entries.length, ts, role: 'user', kind: 'text', blocks, meta: {} });
         } else if (m.role === 'assistant' && blocks.length) {
-          entries.push({ id: 'h' + entries.length, ts, role: 'assistant', kind: 'text', blocks, meta: { model: m.model || null } });
-          if (m.model && !env.model) env.model = m.model;
+          entries.push({ id: 'h' + entries.length, ts, role: 'assistant', kind: 'text', blocks, meta: { model: (m.extra_info && (m.extra_info.model_name || m.extra_info.model)) || m.model || null } });
+          if (!env.model && m.extra_info && (m.extra_info.model_name || m.extra_info.model)) env.model = m.extra_info.model_name || m.extra_info.model;
+        } else if (m.role === 'tool' && toolResult) {
+          entries.push({ id: 'h' + entries.length, ts, role: 'user', kind: 'tool-result', blocks: [{ type: 'tool_result', ...toolResult }], meta: {} });
         }
       }
     }
+    if (!sess) throw new Error(`Trae 会话不存在: ${sessionId}`);
     if (sess) {
       cwd = '';
       try {
@@ -554,11 +594,20 @@ function safe(v) { try { return typeof v === 'string' ? JSON.parse(v) : (v ?? {}
 function doctor(baseDir) {
   const p = dbPath(baseDir);
   const exists = fs.existsSync(p);
+  // 不触发密钥扫描/解密（避免任意列表请求都做重活）：会话数只从已有解密缓存统计
   let sessions = 0;
-  try { sessions = listSessions(baseDir).length; } catch { }
+  try {
+    const st = fs.statSync(p);
+    const cache = plainCachePath(p, st);
+    if (fs.existsSync(cache)) {
+      const { DatabaseSync: DS } = require('node:sqlite');
+      const db = new DS(cache, { readOnly: true });
+      try { sessions = db.prepare('SELECT count(*) c FROM chat_session').get().c; } finally { db.close(); }
+    }
+  } catch { }
   return {
     agent: AGENT, ok: exists && sessions > 0, storage: p, sessionFiles: sessions,
-    note: exists ? null : '未发现 Trae 数据库（%APPDATA%\\Trae CN\\ModularData\\ai-agent\\database.db）',
+    note: exists ? (sessions > 0 ? null : '数据库存在；会话列表将在点开该 agent 时解密（密钥扫描需 Trae 运行中）') : '未发现 Trae 数据库（%APPDATA%\\Trae CN\\ModularData\\ai-agent\\database.db）',
   };
 }
 

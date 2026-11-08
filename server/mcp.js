@@ -27,7 +27,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         instance: { type: 'string', description: '实例 id（来自 list_agents）；不填则按 agent 类型取第一个实例' },
-        agent: { type: 'string', description: 'agent 类型：claude | codex | zcode | workbuddy | opencode | dsh | gemini | pi | openclaw | vscode | cursor' },
+        agent: { type: 'string', description: 'agent 类型：claude | codex | zcode | workbuddy | opencode | dsh | gemini | pi | openclaw | vscode | cursor | hermes | trae | doubao' },
         q: { type: 'string', description: '按标题/项目路径过滤' },
         limit: { type: 'number', description: '最多返回条数，默认 20' },
       },
@@ -136,6 +136,7 @@ async function callTool(name, args = {}) {
     case 'search_sessions': {
       const q = String(args.q || '').trim();
       if (q.length < 2) return textResult({ error: 'q 至少 2 个字符' }, true);
+      if (args.instance && !agents.getInstance(args.instance)) return textResult({ error: `实例不存在: ${args.instance}` }, true);
       const results = await require('./core/search').searchAll({
         q,
         instanceId: args.instance || null,

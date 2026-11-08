@@ -6,6 +6,7 @@
 // 写入铁律：绝不 PRAGMA triggers off / 绝不直写 FTS 影子表（索引会静默损坏）；列集合运行时探测，不硬编码
 const fs = require('fs');
 const path = require('path');
+
 const crypto = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { HOME, cacheDir, ensureDir, nowISO, randomUUID, truncateStr } = require('./util');
@@ -39,7 +40,7 @@ function getReadDbFile(baseDir) {
   const src = dbPath(baseDir);
   if (!fs.existsSync(src)) throw new Error(`Hermes state.db 不存在: ${src}`);
   ensureDir(cacheDir());
-  const dest = path.join(cacheDir(), 'hermes-read-copy.db');
+  const dest = path.join(cacheDir(), 'hermes-read-' + crypto.createHash('md5').update(src).digest('hex').slice(0, 8) + '.db');
   for (const ext of ['', '-wal', '-shm']) {
     const s = src + ext;
     if (fs.existsSync(s)) fs.copyFileSync(s, dest + ext);

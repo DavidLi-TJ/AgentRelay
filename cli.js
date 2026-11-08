@@ -67,6 +67,7 @@ async function route(cmd, args) {
     }
   } else if (cmd === 'list') {
     const agent = args.agent || args._[1] || 'claude';
+    if (!agents.META[agent]) throw new Error('未知 agent: ' + agent + '（可用: ' + Object.keys(agents.META).join(', ') + '）');
     let list = agents.agentSummary(agent, { sessions: true }).sessions || [];
     if (args.q) {
       const q = String(args.q).toLowerCase();

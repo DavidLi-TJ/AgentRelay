@@ -30,7 +30,7 @@ One more thing worth saying plainly: everything above happens in a browser page.
 
 ## What it does
 
-- **One page for every session.** Eleven agents (Claude Code, Codex CLI, ZCode, WorkBuddy, OpenCode, DeepSeek Harness, Gemini CLI, Pi, OpenClaw, VS Code Copilot, Cursor), browsable, filterable, and full-text searchable, with verbatim preview on the right.
+- **One page for every session.** Fourteen agents (Claude Code, Codex CLI, ZCode, WorkBuddy, OpenCode, DeepSeek Harness, Gemini CLI, Pi, OpenClaw, VS Code Copilot, Cursor, Hermes Agent, Trae, Doubao Work), browsable, filterable, and full-text searchable, with verbatim preview on the right.
 - **Carry only what you want.** Check entries one by one, or set the stage with toggles for thinking blocks, tool results, and system injections, a from-entry offset, a token cap, and regex-based secret redaction.
 - **Write into the target, not at it.** Relay synthesizes the target agent's own session format and registers it, so `claude --resume` / `codex resume` / the desktop session list just works.
 - **Back up first, always.** Any write that touches an existing database takes a consistent SQLite snapshot (`VACUUM INTO`) first; relays that only create brand-new files don't need one. Twenty are kept, and the Diagnostics page restores any of them.
@@ -92,8 +92,8 @@ Sessions live on one machine, but work moves. Export selected sessions (or a who
 | Claude Code | `~/.claude/projects/` | ✓ | T0 / T1 / T2 | `claude --resume` |
 | Codex CLI | `~/.codex/sessions/` + `state_5.sqlite` | ✓ | T0 / T1 / T2 | `codex resume` |
 | ZCode | `~/.zcode/cli/db/db.sqlite` | ✓ | T0 / T1 / T2 | Desktop session list |
-| WorkBuddy（国内版）| `~/.workbuddy/workbuddy.db` | ✓ | T1 / T2 | Desktop session list |
-| WorkBuddy AI（国际版）| `~/.workbuddy-ai/workbuddy.db` | ✓ | T1 / T2 | Desktop session list |
+| WorkBuddy（国内版）| `~/.workbuddy/workbuddy.db` | ✓ | T0 / T1 / T2 | Desktop session list |
+| WorkBuddy AI（国际版）| `~/.workbuddy-ai/workbuddy.db` | ✓ | T0 / T1 / T2 | Desktop session list |
 | OpenCode | `~/.local/share/opencode/opencode.db` | ✓ | T1 / T2 | Session list |
 | DeepSeek Harness | `~/.dsh/sessions/` (multi-frame zstd) | ✓ | T0 / T1 / T2 | Session list |
 | Gemini CLI (experimental) | `~/.gemini/tmp/*/chats/` | ✓ | T0 / T1 / T2 | `gemini` `/resume` |
@@ -102,7 +102,7 @@ Sessions live on one machine, but work moves. Export selected sessions (or a who
 | Cursor (experimental) | `globalStorage/state.vscdb` (`composerData`/`bubbleId` + `composerHeaders`) | ✓ | T1 / T2 | Chat History |
 | Doubao Work (experimental) | in-app IndexedDB + cloud (no local session store) | ✓ | T2 | task reads the transcript file |
 | Hermes Agent | `state.db` (SQLite; `%LOCALAPPDATA%\hermes` or `HERMES_HOME`) | ✓ | T0 / T1 / T2 | `hermes sessions list` |
-| Trae (read-only source) | SQLCipher `database.db` (key extracted from the running Trae process) | ✓ read-only | T2 | T2 transcript in project |
+| Trae | SQLCipher `database.db` (key extracted from the running Trae process) | ✓ | T0 / T1 / T2 | Session list |
 
 Experimental adapters are implemented from official source schemas (Cursor's from community reverse-engineering, since no import API exists) and pass synthetic-sample tests. Notes: the two WorkBuddy editions are separate installs and appear as separate cards — domestic reads/writes only `~/.workbuddy`, international only `~/.workbuddy-ai`, never mixed; VS Code does not persist tool outputs — relayed sessions carry a placeholder there; Cursor T1 requires Cursor to be fully closed while writing (its in-memory state can overwrite external edits on exit) and takes a workspace-database snapshot first; DeepSeek Harness as a native target needs the zstd built into Node ≥ 23.8 (older Nodes are auto-downgraded to T2 in the UI). Trae works as a **read-only source**: its agent database is SQLCipher-encrypted, but the key (generated at runtime inside Trae's own backend) can be extracted from the running `ai` backend process memory and verified against the database's page-1 HMAC — page-level decryption then runs entirely in Node's own crypto (method independently validated by two MIT-licensed OSS projects). Trae must be running while a key scan happens; writes stay on T2 (decrypt-modify-reencrypt has no prior art and carries real corruption risk). Doubao Work keeps its session transcripts inside the app's own IndexedDB/cloud with no local native store, so it is T2-only: the verbatim transcript lands in the local folder your Doubao project has bound, and the result panel gives you a kickoff prompt to paste into a new work task. Several instances of the same agent (say, two Claude config directories) can be added in Settings.
 

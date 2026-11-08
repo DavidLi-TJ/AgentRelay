@@ -4,7 +4,7 @@
 const AGENT_COLORS = { claude: '#d97757', codex: '#10a37f', zcode: '#4f7cff', workbuddy: '#3c8cff', opencode: '#e8a33d', gemini: '#4796e3', pi: '#c9a227', openclaw: '#e05e3d', dsh: '#2aa8c9', vscode: '#8957e5', cursor: '#6c7ee1' };
 const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex CLI', zcode: 'ZCode', workbuddy: 'WorkBuddy', opencode: 'OpenCode', gemini: 'Gemini CLI', pi: 'Pi', openclaw: 'OpenClaw', dsh: 'DeepSeek Harness', vscode: 'VS Code Copilot', cursor: 'Cursor' };
 // 原生接力能力兜底表（与服务端 agents.js META.cap 同步；/api/agents 实例会带实时 cap，优先用那个）
-const AGENT_CAPS = { claude: { t0: 1, t1: 1 }, codex: { t0: 1, t1: 1 }, zcode: { t0: 1, t1: 1 }, workbuddy: { t0: 0, t1: 1 }, opencode: { t0: 0, t1: 1 }, gemini: { t0: 1, t1: 1 }, pi: { t0: 1, t1: 1 }, openclaw: { t0: 1, t1: 1 }, dsh: { t0: 1, t1: 1 }, vscode: { t0: 1, t1: 1 }, cursor: { t0: 0, t1: 1 } };
+const AGENT_CAPS = { claude: { t0: 1, t1: 1 }, codex: { t0: 1, t1: 1 }, zcode: { t0: 1, t1: 1 }, workbuddy: { t0: 1, t1: 1 }, opencode: { t0: 1, t1: 1 }, gemini: { t0: 1, t1: 1 }, pi: { t0: 1, t1: 1 }, openclaw: { t0: 1, t1: 1 }, dsh: { t0: 1, t1: 1 }, vscode: { t0: 1, t1: 1 }, cursor: { t0: 0, t1: 1 } };
 
 const state = {
   instances: [],
@@ -1067,8 +1067,16 @@ function renderRelay() {
     if (ag && !ag.available) { toast(ag.name + ': ' + t('未检测到存储'), 'warn'); return; }
     if (m.targets.has(id)) m.targets.delete(id); else m.targets.add(id);
     // 推荐级别统一走 targetAdvice（读 META cap）——同源但目标不支持 T0（如 cursor/workbuddy）时不会误选
+    // 取消目标后同样按剩余目标重算，否则 mode 残留与徽标/选中态自相矛盾（审计 P2-2）
     const srcIids = [...m.selected.keys()];
-    if (m.targets.size === 1 && srcIids.length === 1) m.mode = targetAdvice(srcIids[0], ag).mode;
+    const remaining = [...m.targets].map((iid) => state.instances.find((a) => a.id === iid)).filter(Boolean);
+    if (m.targets.size === 1 && srcIids.length === 1) {
+      m.mode = targetAdvice(srcIids[0], remaining[0]).mode;
+    } else if (remaining.length) {
+      // 多目标：取所有目标 cap 的公共档（全支持 T1 → T1，否则 T2）
+      const allT1 = remaining.every((a) => a.cap && a.cap.t1);
+      m.mode = allT1 ? 'T1' : 'T2';
+    }
     renderRelay();
   }));
   const srcIids0 = [...m.selected.keys()];

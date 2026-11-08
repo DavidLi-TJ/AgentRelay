@@ -297,8 +297,11 @@ function redactMsx(msx) {
   const cleaned = redactDeep(extra, counter);
   const title = cleaned && cleaned.title;
   const env = cleaned && cleaned.env;
+  // claude passthrough 保真行（sidechain/attachment/元数据）同样含正文——必须一并脱敏，否则密钥绕过脱敏落盘
+  let passthrough = msx._passthrough;
+  if (Array.isArray(passthrough) && passthrough.length) passthrough = redactDeep(passthrough, counter);
     if (counter.n > 0) msx.loss = [...(msx.loss || []), `已脱敏 ${counter.n} 处疑似密钥/凭据`];
-  return { ...msx, entries, source: { ...(msx.source || {}), title }, env };
+  return { ...msx, entries, _passthrough: passthrough, source: { ...(msx.source || {}), title }, env };
 }
 
 // ---------- 会话上下文编辑 ----------

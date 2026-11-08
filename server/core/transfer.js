@@ -227,7 +227,8 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
       }
       result.ok = true;
     } else if (mode === 'T0') {
-      if (targetAgent !== sourceAgent) throw new Error('T0 仅支持同源（相同 agent）接力；跨 agent 请用 T1/T2');
+      const effSource = (srcInst && srcInst.type) || sourceAgent;
+      if (effSource !== targetAgent) throw new Error('T0 仅支持同源（相同 agent）接力；跨 agent 请用 T1/T2');
       const ad = agents.ADAPTERS[targetAgent];
       if (!ad || typeof ad.rawCopy !== 'function' && typeof ad.copySession !== 'function') {
         throw new Error(targetAgent + ' 暂不支持 T0 原生复制；请用 T1（原生注入）或 T2（逐字转写）');
@@ -286,6 +287,14 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
       }
       result.ok = true;
     } else if (mode === 'T1') {
+      // cap.t1=0 的目标（豆包等）不支持 T1：dry-run 如实说明，真实执行明确报错而非 TypeError（审计 P2-1）
+      const capT1 = !!(agents.META[targetAgent] && agents.META[targetAgent].cap && agents.META[targetAgent].cap.t1);
+      if (!capT1 && !dryRun) throw new Error(targetAgent + ' 不支持 T1 原生注入——请改用 T2 逐字转写');
+      if (!capT1 && dryRun) {
+        result.ok = true;
+        result.notes.push('[dry-run] 该目标不支持 T1 原生注入——真实执行将明确报错；请改选 T2 逐字转写');
+        return finish();
+      }
       if (dryRun) {
         result.ok = true;
         result.notes.push(`[dry-run] 将以 ${targetAgent} 原生格式写入 ${describeTarget(targetAgent, cwd, tgtBase)}（${msx.stats.entries} 条 / ~${msx.stats.approxTokens} tokens）`);

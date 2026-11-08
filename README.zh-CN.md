@@ -26,7 +26,7 @@ AgentRelay 搬的是会话本身：每条消息、每次工具调用和结果、
 
 ## 功能一览
 
-- **一个页面看全所有会话**：十一家 agent（Claude Code、Codex CLI、ZCode、WorkBuddy、OpenCode、DeepSeek Harness、Gemini CLI、Pi、OpenClaw、VS Code Copilot、Cursor）的会话统一浏览、筛选、全文搜索，右侧逐字预览。
+- **一个页面看全所有会话**：十四家 agent（Claude Code、Codex CLI、ZCode、WorkBuddy、OpenCode、DeepSeek Harness、Gemini CLI、Pi、OpenClaw、VS Code Copilot、Cursor、Hermes Agent、Trae、豆包工作）的会话统一浏览、筛选、全文搜索，右侧逐字预览。
 - **带走多少自己定**：逐条勾选；也可以用开关批量定——思考块、工具结果、系统注入、起始条数、token 上限、密钥正则脱敏。
 - **写进目标的原生存储**：合成为目标 agent 自己的会话格式并注册，`claude --resume`、`codex resume`、桌面端会话列表直接认。
 - **先备份再写入**：任何会触碰既有数据库的写入前都做一致性快照（SQLite `VACUUM INTO`），保留 20 份，诊断页一键还原；只新建文件的接力无需备份。
@@ -88,8 +88,8 @@ npx @ldavidl/agentrelay serve  # 一条命令，然后打开 http://127.0.0.1:17
 | Claude Code | `~/.claude/projects/` | ✓ | T0 / T1 / T2 | `claude --resume` |
 | Codex CLI | `~/.codex/sessions/` + `state_5.sqlite` | ✓ | T0 / T1 / T2 | `codex resume` |
 | ZCode | `~/.zcode/cli/db/db.sqlite` | ✓ | T0 / T1 / T2 | 桌面端会话列表 |
-| WorkBuddy（国内版） | `~/.workbuddy/workbuddy.db` | ✓ | T1 / T2 | 桌面端会话列表 |
-| WorkBuddy AI（国际版） | `~/.workbuddy-ai/workbuddy.db` | ✓ | T1 / T2 | 桌面端会话列表 |
+| WorkBuddy（国内版） | `~/.workbuddy/workbuddy.db` | ✓ | T0 / T1 / T2 | 桌面端会话列表 |
+| WorkBuddy AI（国际版） | `~/.workbuddy-ai/workbuddy.db` | ✓ | T0 / T1 / T2 | 桌面端会话列表 |
 | OpenCode | `~/.local/share/opencode/opencode.db` | ✓ | T1 / T2 | 会话列表 |
 | DeepSeek Harness | `~/.dsh/sessions/`（zstd 多帧） | ✓ | T0 / T1 / T2 | 会话列表 |
 | Gemini CLI（实验性） | `~/.gemini/tmp/*/chats/` | ✓ | T0 / T1 / T2 | `gemini` `/resume` |
@@ -98,6 +98,7 @@ npx @ldavidl/agentrelay serve  # 一条命令，然后打开 http://127.0.0.1:17
 | Cursor（实验性） | `globalStorage/state.vscdb`（`composerData`/`bubbleId` + `composerHeaders`） | ✓ | T1 / T2 | Chat History |
 | 豆包工作（实验性） | 应用内 IndexedDB + 云端（无本地会话库） | ✓ | T2 | 工作任务读取转写文件 |
 | Hermes Agent | `state.db`（SQLite；`%LOCALAPPDATA%\hermes` 或 `HERMES_HOME`） | ✓ | T0 / T1 / T2 | `hermes sessions list` |
+| Trae | SQLCipher `database.db`（密钥从运行中的 Trae 进程提取） | ✓ | T0 / T1 / T2 | 会话列表 |
 
 实验性适配器基于官方源码 schema 实现（Cursor 无导入 API，schema 来自社区逆向）并通过合成样本测试。注意：WorkBuddy 的国内版与国际版是两套独立安装，作为两张独立卡片出现，各自锁定 `~/.workbuddy` 与 `~/.workbuddy-ai`，绝不互相混扫；VS Code 不持久化工具输出，接力后的会话该处为占位；Cursor T1 写入时要求 Cursor 完全退出（退出时的内存态可能覆盖外部写入），写入前会快照工作区数据库；DeepSeek Harness 的 T0/T1 需要 Node ≥ 23.8 的内置 zstd（低版本界面会自动降级为 T2）。豆包工作（Doubao Work）的会话正文在其应用内 IndexedDB/云端，没有本地原生会话库，因此仅支持 T2：逐字转写写进它绑定的本地项目目录，结果面板给出启动提示词，新建工作任务粘贴即可继续。同一个 agent 可以在设置页添加多个实例（比如两个 Claude 配置目录）。
 
