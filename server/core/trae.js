@@ -326,12 +326,20 @@ function insertSession(db, { sessionId, cwd, title, entries, sourceAgent }) {
   const hCols = db.prepare('PRAGMA table_info("history_v2")').all().map((c) => c.name);
   const raws = [];
   for (const e of entries || []) {
+    // 工具结果按真实 Trae 形态落盘：独立 role='tool' 行 + <toolcall_status/result> 包装（读侧可解析回来，写读闭环）
+    if (e.kind === 'tool-result') {
+      const b = (e.blocks || []).find((x) => x.type === 'tool_result');
+      if (!b) continue;
+      const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+      const wrapper = (b.isError ? '<toolcall_status>error</toolcall_status>' : '<toolcall_status>done</toolcall_status>') + '<toolcall_result>' + outText + '</toolcall_result>';
+      raws.push({ role: 'tool', content: [{ type: 'text', text: wrapper }], tool_call_id: b.for || 'call' });
+      continue;
+    }
     const blocks = [];
     for (const b of e.blocks || []) {
       if (b.type === 'text' && b.text) blocks.push({ type: 'text', text: b.text });
       else if (b.type === 'thinking' && b.text) blocks.push({ type: 'thinking', text: b.text });
       else if (b.type === 'tool_use') blocks.push({ type: 'tool_use', id: b.id || 'call_' + crypto.randomBytes(4).toString('hex'), name: b.name || 'tool', arguments: JSON.stringify(b.input ?? {}) });
-      else if (b.type === 'tool_result') blocks.push({ type: 'tool_result', tool_call_id: b.for || 'call', output: typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? ''), is_error: !!b.isError });
     }
     if (blocks.length) raws.push({ role: e.role === 'assistant' ? 'assistant' : 'user', content: blocks });
   }
@@ -359,16 +367,18 @@ function copySession(sessionId, { baseDir } = {}) {
   const got = getPlainDb(encDb);
   const plainFile = got.dbFile, salt = got.salt, encKey = got.encKey;
   if (got.stale) throw new Error('Trae 数据已有更新而本地无当前密钥——请启动 Trae（打开 AI 面板）后重试，以基于最新数据写入');
-  if (fs.existsSync(encDb + '-wal')) throw new Error('检测到未合并的 WAL 日志（Trae 可能异常退出）：请启动并正常退出 Trae 以合并日志后重试，否则写入会损坏数据库');
-  if (isDefaultRealDb(baseDir, encDb) && traeRunning()) throw new Error('检测到 Trae 正在运行：请先完全退出 Trae 再执行（密钥已在本会话缓存，退出后直接重试即可）');
+  if (isDefaultRealDb(baseDir, encDb) && traeRunning()) throw new Error('检测到 Trae 正在运行：请先完全退出 Trae 再执行（退出时日志会自动合并）');
+  if (fs.existsSync(encDb + '-wal')) throw new Error('Trae 已退出但仍有未合并的日志（可能上次异常退出）：请再次启动并正常退出 Trae，合并后重试，否则写入会损坏数据库');
   if (!got.decrypted) throw new Error('Trae 目标库已是明文（未加密），该路径未实现——请确认指向的是加密的 database.db');
-  if (!encKey) throw new Error('本会话尚未提取到密钥：请先启动 Trae（打开 AI 面板）并执行一次 Dry-run 以提取密钥，然后退出 Trae 重试写入');
+  if (!encKey) throw new Error('尚未提取到密钥：请启动 Trae 并打开 AI 会话列表（密钥提取需要其后端进程运行），然后退出 Trae 重试写入');
   const db = new DatabaseSync(plainFile);
-  let newSid = null, count = 0;
+  let newSid = null, count = 0, srcTitle = null;
+  // 注意：src 声明在 try 内——标题先提到外层变量，return 时不再引用 try 作用域（审计 P1-A）
   try {
     db.exec('PRAGMA busy_timeout=4000');
     const src = db.prepare('SELECT * FROM chat_session WHERE session_id = ?').get(sessionId);
     if (!src) throw new Error('Trae T0：源会话不存在: ' + sessionId);
+    srcTitle = src.session_title || null;
     newSid = crypto.randomUUID();
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -402,7 +412,7 @@ function copySession(sessionId, { baseDir } = {}) {
   fs.renameSync(tmpOut, encDb);
   for (const ext of ['-wal', '-shm']) { try { fs.rmSync(encDb + ext, { force: true }); } catch { } } // 旧 WAL 帧重放会覆盖注入内容，必须清除
   try { fs.rmSync(plainFile, { force: true }); } catch { }
-  return { id: newSid, path: encDb, count, backup: bk.dir, resumeCommand: `Trae（重新打开）会话列表选择「${src.session_title || newSid.slice(0, 8)}」` };
+  return { id: newSid, path: encDb, count, backup: bk.dir, resumeCommand: `Trae（重新打开）会话列表选择「${srcTitle || newSid.slice(0, 8)}」` };
 }
 function insertRowPlain(db, table, cols, row) {
   const names = cols.filter((n) => row[n] !== undefined);
@@ -417,14 +427,13 @@ function writeSession(msx, { cwd, baseDir } = {}) {
   const got = getPlainDb(encDb);
   const plainFile = got.dbFile, salt = got.salt, encKey = got.encKey;
   if (got.stale) throw new Error('Trae 数据已有更新而本地无当前密钥——请启动 Trae（打开 AI 面板）后重试，以基于最新数据写入');
-  if (fs.existsSync(encDb + '-wal')) throw new Error('检测到未合并的 WAL 日志（Trae 可能异常退出）：请启动并正常退出 Trae 以合并日志后重试，否则写入会损坏数据库');
-  if (isDefaultRealDb(baseDir, encDb) && traeRunning()) throw new Error('检测到 Trae 正在运行：注入前请先完全退出 Trae（密钥已在本会话缓存，退出后直接重试即可）');
+  if (isDefaultRealDb(baseDir, encDb) && traeRunning()) throw new Error('检测到 Trae 正在运行：注入前请先完全退出 Trae（密钥已在本会话缓存，退出时日志会自动合并）');
+  if (fs.existsSync(encDb + '-wal')) throw new Error('Trae 已退出但仍有未合并的日志（可能上次异常退出）：请再次启动并正常退出 Trae，合并后重试，否则写入会损坏数据库');
   if (!got.decrypted) throw new Error('Trae 目标库已是明文（未加密），该写入路径未实现——请确认指向的是加密的 database.db');
-  if (!encKey) throw new Error('本会话尚未提取到密钥：请先启动 Trae（打开 AI 面板）并执行一次 Dry-run 以提取密钥，然后退出 Trae 重试写入');
+  if (!encKey) throw new Error('尚未提取到密钥：请启动 Trae 并打开 AI 会话列表（密钥提取需要其后端进程运行），然后退出 Trae 重试写入');
   const loss = [...(msx.loss || [])];
   const entries = msx.entries || [];
   if (!entries.length) throw new Error('没有可写入的内容条目（过滤条件排除了全部内容）');
-  if (!got.decrypted) throw new Error('Trae 目标库已是明文（未加密），该写入路径未实现——请确认指向的是加密的 database.db');
   const db = new DatabaseSync(plainFile);
   const title = (msx.source && msx.source.title) || '导入的会话';
   let newSid = null;
@@ -542,7 +551,8 @@ async function readSession(sessionId, baseDir) {
           toolResult = { for: m.tool_call_id || 'call', output, isError: (statusM && statusM[1].trim() !== 'done') || !!errMsgM };
         }
         // history_v2 可能为同一条消息保留多行快照：按 role+内容指纹去重
-        const fp = m.role + '|' + JSON.stringify(blocks);
+        // 指纹含 tool_call_id / isError——两条输出文本相同的 tool 行不能误并（审计 P3-b）
+        const fp = m.role + '|' + (m.tool_call_id || '') + '|' + JSON.stringify(blocks);
         if (seen.has(fp)) continue;
         seen.add(fp);
         if (m.role === 'user' && blocks.some((b) => b.type === 'text')) {
