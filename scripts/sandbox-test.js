@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 'use strict';
 // 沙盒冒烟测试：全量 reader + 全量 writer（T0/T1/T2 通道、bundle 往返；全部在沙盒/副本上，不动真实存储）
 const fs = require('fs');
@@ -250,6 +251,49 @@ const nowIso = () => new Date().toISOString();
   hmDbChk.close();
   if (!hmSrcMsgs || hmNewMsgs !== hmSrcMsgs) throw new Error('hermes T0 克隆行数不一致');
   console.log(`  codex→hermes: 回读=${hmBack.stats.entries}条 tools=${hmBack.stats.toolCalls} T0=${hmNewMsgs}行`);
+
+  // trae：密码学层往返（合成页 buffer；真实 schema 的写入路径由真库副本验证覆盖）
+  const trae = require('../server/core/trae');
+  {
+    const traeKey = require('crypto').randomBytes(32);
+    const traeSalt = require('crypto').randomBytes(16);
+    trae.__keyCache.set(traeSalt.toString('hex'), traeKey);
+    // 合成"SQLCipher 解密副本"：页 1 = sqlite header + 内容（4016 可用 + 80 保留零），后续页同理
+    const pages = 6;
+    const plain = Buffer.alloc(pages * 4096);
+    Buffer.from('SQLite format 3\x00', 'latin1').copy(plain, 0);
+    plain[16] = 0x10; plain[17] = 0x00; // 页大小 4096
+    plain[20] = 80;                      // reserved space
+    for (let i = 4020; i < 4016 + 4016; i++) plain[i] = 0x61 + (i % 26); // 页 1 内容填充（避开头部字段区）
+    for (let pg = 2; pg <= pages; pg++) for (let i = 0; i < 4016; i++) plain[(pg - 1) * 4096 + i] = 0x41 + ((pg + i) % 26);
+    const plainPath = path.join(SANDBOX, 'trae-synth-plain.db');
+    fs.writeFileSync(plainPath, plain);
+    const encPath = path.join(SANDBOX, 'trae-synth-enc.db');
+    trae.encryptDb(plainPath, encPath, traeKey, traeSalt);
+    if (fs.statSync(encPath).size !== pages * 4096) throw new Error('trae 加密页大小不符');
+    // 解密回验：用 getPlainDb 同样的页布局解回
+    const back = Buffer.alloc(pages * 4096);
+    const eb = Buffer.alloc(4096);
+    const fd = fs.openSync(encPath, 'r');
+    for (let pg = 1; pg <= pages; pg++) {
+      fs.readSync(fd, eb, 0, 4096, (pg - 1) * 4096);
+      const iv = eb.subarray(4016, 4032);
+      const start = pg === 1 ? 16 : 0;
+      const d = crypto.createDecipheriv('aes-256-cbc', traeKey, iv);
+      d.setAutoPadding(false);
+      const dec = Buffer.concat([d.update(eb.subarray(start, 4016)), d.final()]);
+      const out = pg === 1 ? Buffer.concat([Buffer.from('SQLite format 3\x00', 'latin1'), dec]) : dec;
+      out.copy(back, (pg - 1) * 4096);
+    }
+    fs.closeSync(fd);
+    // 逐页对比可用区（页 1 = [0:4016] 含头部；其余页 = [0:4016]）
+    for (let pg = 1; pg <= pages; pg++) {
+      const expect = plain.subarray((pg - 1) * 4096, (pg - 1) * 4096 + 4016);
+      const got = back.subarray((pg - 1) * 4096, (pg - 1) * 4096 + 4016);
+      if (!got.equals(expect)) throw new Error(`trae 加解密往返第 ${pg} 页不一致`);
+    }
+    console.log(`  trae 加解密往返: ${pages} 页 × 4016 可用字节 逐字节一致 ✓`);
+  }
 
   // T0 原生复制（gemini/pi/openclaw/dsh 沙盒内 + 源不可变断言）
   const dshSrcBefore = fs.statSync(rDsh.path).mtimeMs;

@@ -173,16 +173,35 @@ function getPlainDb(dbPath) {
   const fd = fs.openSync(dbPath, 'r');
   fs.readSync(fd, page1, 0, PAGE_SZ, 0);
   fs.closeSync(fd);
-  if (page1.subarray(0, 16).toString('latin1') === 'SQLite format 3\x00') return { dbFile: dbPath, decrypted: false };
+  const salt = page1.subarray(0, SALT_SZ);
+  const saltHex = salt.toString('hex');
+  if (page1.subarray(0, 16).toString('latin1') === 'SQLite format 3\x00') return { dbFile: dbPath, decrypted: false, salt, encKey: null, saltHex };
   const cache = plainCachePath(dbPath, st);
-  if (fs.existsSync(cache)) return { dbFile: cache, decrypted: true };
-  const saltHex = page1.subarray(0, SALT_SZ).toString('hex');
+  const cacheHit = fs.existsSync(cache);
+  let scanErr = null;
   let encKey = keyCache.get(saltHex) || null;
-  if (!encKey) {
-    encKey = scanKeyViaPowerShell(dbPath, page1);
-    if (!encKey) throw new Error('未能从运行中的 Trae 进程内存提取密钥——请确认 Trae 已启动并打开过 AI 对话（密钥仅存在于 ai-agent 进程内存）');
+  // 读路径：解密副本在缓存中即可（Trae 关闭后依旧可读；源库更新后旧快照标记 stale 仍可读）
+  // 写路径：必须基于当前版本的库——stale 快照 + 无密钥时明确要求启动 Trae
+  if (!encKey && !cacheHit) {
+    try {
+      encKey = scanKeyViaPowerShell(dbPath, page1);
+    } catch (e) {
+      encKey = null;
+      scanErr = e;
+    }
+    if (!encKey) {
+      // 过期快照回退（只读）
+      const prefix = `trae-dec-${path.basename(path.dirname(path.dirname(dbPath)))}-${st.size}-`;
+      const cands = fs.existsSync(cacheDir()) ? fs.readdirSync(cacheDir()).filter((f) => f.startsWith(prefix) && f.endsWith('.db')).map((f) => path.join(cacheDir(), f)) : [];
+      if (cands.length) {
+        const newest = cands.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+        return { dbFile: newest, decrypted: true, stale: true, salt, encKey: null, saltHex };
+      }
+      throw (scanErr || new Error('未能从运行中的 Trae 进程内存提取密钥——请确认 Trae 已启动并打开过 AI 对话（密钥仅存在于 ai-agent 进程内存）'));
+    }
     keyCache.set(saltHex, encKey);
   }
+  if (cacheHit) return { dbFile: cache, decrypted: true, salt, encKey, saltHex };
   ensureDir(cacheDir());
   // 原子写：先写临时文件，全部页解密成功后 rename——中途失败不留下半成品缓存（曾被空壳缓存命中过）
   const tmp = cache + '.tmp-' + process.pid;
@@ -215,7 +234,198 @@ function getPlainDb(dbPath) {
     try { fs.rmSync(tmp, { force: true }); } catch { }
     throw e;
   }
-  return { dbFile: cache, decrypted: true };
+  return { dbFile: cache, decrypted: true, salt, encKey, saltHex };
+}
+
+// ---------- 加密（重加密回 SQLCipher 页格式）：逐页 IV + HMAC，格式与读侧校验完全一致 ----------
+function encryptDb(plainPath, outPath, encKey, salt) {
+  const macKey = crypto.pbkdf2Sync(encKey, Buffer.from(salt).map((b) => b ^ 0x3a), 2, 32, 'sha512');
+  const st = fs.statSync(plainPath);
+  const total = Math.ceil(st.size / PAGE_SZ);
+  const tmp = outPath + '.tmp-' + process.pid;
+  const out = fs.openSync(tmp, 'w');
+  const fdIn = fs.openSync(plainPath, 'r');
+  try {
+    for (let pgno = 1; pgno <= total; pgno++) {
+      const expect = pgno === total ? st.size - (total - 1) * PAGE_SZ : PAGE_SZ;
+      const raw = Buffer.alloc(PAGE_SZ); // 尾页不足 4096 补零（SQLCipher 库本身页对齐，此处兜底）
+      fs.readSync(fdIn, raw, 0, expect, (pgno - 1) * PAGE_SZ);
+      const iv = crypto.randomBytes(16);
+      // 页 1 加密区 = 4096 − 16(salt) − 80(reserve) = 4000 字节；其余页 = 4016 字节
+      const dataLen = pgno === 1 ? PAGE_SZ - SALT_SZ - RESERVE_SZ : PAGE_SZ - RESERVE_SZ;
+      const enc = Buffer.alloc(dataLen);
+      if (pgno === 1) raw.copy(enc, 0, SALT_SZ, SALT_SZ + dataLen);
+      else raw.copy(enc, 0, 0, dataLen);
+      const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
+      cipher.setAutoPadding(false);
+      const ct = Buffer.concat([cipher.update(enc), cipher.final()]);
+      const pgnoLe = Buffer.from([pgno & 255, (pgno >> 8) & 255, (pgno >> 16) & 255, (pgno >> 24) & 255]);
+      const mac = crypto.createHmac('sha512', macKey).update(ct).update(iv).update(pgnoLe).digest();
+      const outPage = pgno === 1 ? Buffer.concat([salt, ct, iv, mac]) : Buffer.concat([ct, iv, mac]);
+      fs.writeSync(out, outPage, 0, PAGE_SZ);
+    }
+    fs.closeSync(fdIn);
+    fs.closeSync(out);
+    fs.renameSync(tmp, outPath);
+  } catch (e) {
+    try { fs.closeSync(fdIn); } catch { }
+    try { fs.closeSync(out); } catch { }
+    try { fs.rmSync(tmp, { force: true }); } catch { }
+    throw e;
+  }
+}
+
+// Trae 存活检查：其内存页缓存在 checkpoint 时会覆盖外部修改——注入/复制前必须完全退出
+function traeRunning() {
+  try {
+    const { execSync } = require('child_process');
+    const out = execSync('powershell -NoProfile -Command "(Get-Process | Where-Object { $_.Name -like \'Trae*\' } | Measure-Object).Count"', { timeout: 30000, encoding: 'utf8' });
+    return parseInt(String(out).trim(), 10) > 0;
+  } catch { return false; }
+}
+
+// 在明文库上注册会话（T0 克隆与 T1 注入共用）：列集合运行时探测，cwd → project.absolute_path 反查 project_id
+function insertSession(db, { sessionId, cwd, title, entries, sourceAgent }) {
+  const sCols = db.prepare('PRAGMA table_info("chat_session")').all().map((c) => c.name);
+  const tpl = db.prepare('SELECT * FROM chat_session ORDER BY updated_at DESC LIMIT 1').get() || {};
+  let projectId = tpl.project_id ?? null;
+  try {
+    const pcols = db.prepare('PRAGMA table_info("project")').all().map((c) => c.name);
+    const pathCol = pcols.includes('absolute_path') ? 'absolute_path' : (pcols.includes('path') ? 'path' : null);
+    if (cwd && pathCol) {
+      const norm = (s) => String(s || '').toLowerCase().replace(/[\\/]+$/, '');
+      const p = db.prepare(`SELECT project_id FROM project WHERE LOWER(${JSON.stringify(pathCol).replace(/"/g, '')}) = ?`).get(norm(cwd));
+      if (p) projectId = p.project_id;
+    }
+  } catch { }
+  if (projectId == null && tpl.project_id == null) throw new Error('Trae 注入：未找到匹配的项目（请先在 Trae 中打开过该目录，或改用 T2 转写）');
+  const now = Math.round(Date.now() / 1000);
+  const row = { ...tpl, session_id: sessionId, project_id: projectId, session_title: title, session_type: (tpl && tpl.session_type) || 'side_chat', created_at: now, updated_at: now };
+  // 剔除 INTEGER PRIMARY KEY 列（sqlite 自增），避免与模板行撞唯一约束
+  const autoPk = new Set(db.prepare('PRAGMA table_info("chat_session")').all().filter((c) => c.pk > 0 && /INT/i.test(c.type || '')).map((c) => c.name));
+  const names = sCols.filter((n) => row[n] !== undefined && row[n] !== null && !autoPk.has(n));
+  db.prepare(`INSERT INTO chat_session (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`).run(...names.map((n) => row[n]));
+  try {
+    const spCols = db.prepare('PRAGMA table_info("session_project")').all().map((c) => c.name);
+    if (spCols.length && projectId != null) {
+      const spRow = { session_id: sessionId, project_id: projectId };
+      const spNames = spCols.filter((n) => spRow[n] !== undefined);
+      if (spNames.length) db.prepare(`INSERT INTO session_project (${spNames.map((n) => '"' + n + '"').join(',')}) VALUES (${spNames.map(() => '?').join(',')})`).run(...spNames.map((n) => spRow[n]));
+    }
+  } catch { /* 关联表非致命 */ }
+  // history_v2：整段会话作为一行 raw_messages JSON
+  const hCols = db.prepare('PRAGMA table_info("history_v2")').all().map((c) => c.name);
+  const raws = [];
+  for (const e of entries || []) {
+    const blocks = [];
+    for (const b of e.blocks || []) {
+      if (b.type === 'text' && b.text) blocks.push({ type: 'text', text: b.text });
+      else if (b.type === 'thinking' && b.text) blocks.push({ type: 'thinking', text: b.text });
+      else if (b.type === 'tool_use') blocks.push({ type: 'tool_use', id: b.id || 'call_' + crypto.randomBytes(4).toString('hex'), name: b.name || 'tool', arguments: JSON.stringify(b.input ?? {}) });
+      else if (b.type === 'tool_result') blocks.push({ type: 'tool_result', tool_call_id: b.for || 'call', output: typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? ''), is_error: !!b.isError });
+    }
+    if (blocks.length) raws.push({ role: e.role === 'assistant' ? 'assistant' : 'user', content: blocks });
+  }
+  const hRow = {
+    history_v2_id: 'h_' + crypto.randomBytes(16).toString('hex'),
+    session_id: sessionId, message_id: 'msg_' + crypto.randomBytes(8).toString('hex'),
+    messages: JSON.stringify({ raw_messages: raws }),
+    token_usage: 0, agent_type: null, content_source: 'agentrelay', created_at: now,
+  };
+  const hNames = hCols.filter((n) => hRow[n] !== undefined && hRow[n] !== null && n !== 'id');
+  db.prepare(`INSERT INTO history_v2 (${hNames.map((n) => '"' + n + '"').join(',')}) VALUES (${hNames.map(() => '?').join(',')})`).run(...hNames.map((n) => hRow[n]));
+  if (sCols.includes('message_count')) db.prepare('UPDATE chat_session SET message_count = ? WHERE session_id = ?').run(raws.length, sessionId).changes;
+  return { projectId };
+}
+
+// T0：同源原生复制（明文库上克隆会话行 → 整库重加密替换）
+function isDefaultRealDb(baseDir, encDb) {
+  if (baseDir) return false;
+  return dataRoots().some((r) => path.resolve(encDb) === path.resolve(path.join(r, 'database.db')));
+}
+
+function copySession(sessionId, { baseDir } = {}) {
+  const encDb = dbPath(baseDir);
+  if (!fs.existsSync(encDb)) throw new Error('Trae database.db 不存在: ' + encDb);
+  const got = getPlainDb(encDb);
+  const plainFile = got.dbFile, salt = got.salt, encKey = got.encKey;
+  if (got.stale) throw new Error('Trae 数据已有更新而本地无当前密钥——请启动 Trae（打开 AI 面板）后重试，以基于最新数据写入');
+  if (isDefaultRealDb(baseDir, encDb) && traeRunning()) throw new Error('检测到 Trae 正在运行：请先完全退出 Trae 再执行（密钥已在本会话缓存，退出后直接重试即可）');
+  if (!got.decrypted) throw new Error('Trae 目标库已是明文（未加密），该路径未实现——请确认指向的是加密的 database.db');
+  const db = new DatabaseSync(plainFile);
+  let newSid = null, count = 0;
+  try {
+    db.exec('PRAGMA busy_timeout=4000');
+    const src = db.prepare('SELECT * FROM chat_session WHERE session_id = ?').get(sessionId);
+    if (!src) throw new Error('Trae T0：源会话不存在: ' + sessionId);
+    newSid = crypto.randomUUID();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const sCols = db.prepare('PRAGMA table_info("chat_session")').all().map((c) => c.name);
+      const row = { ...src, session_id: newSid };
+      const names = sCols.filter((n) => row[n] !== undefined);
+      db.prepare(`INSERT INTO chat_session (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`).run(...names.map((n) => row[n]));
+      const hCols = db.prepare('PRAGMA table_info("history_v2")').all().map((c) => c.name).filter((n) => n !== 'id');
+      const rows = db.prepare(`SELECT ${hCols.map((n) => '"' + n + '"').join(',')} FROM history_v2 WHERE session_id = ? ORDER BY id`).all(sessionId);
+      for (const r of rows) { insertRowPlain(db, 'history_v2', hCols, { ...r, session_id: newSid }); count++; }
+      try {
+        const sp = db.prepare('SELECT * FROM session_project WHERE session_id = ?').get(sessionId);
+        if (sp) {
+          const spCols = db.prepare('PRAGMA table_info("session_project")').all().map((c) => c.name);
+          insertRowPlain(db, 'session_project', spCols, { ...sp, session_id: newSid });
+        }
+      } catch { }
+      db.exec('COMMIT');
+    } catch (e) { try { db.exec('ROLLBACK'); } catch { } throw e; }
+  } finally { db.close(); }
+  // 备份原加密库 → 整库重加密替换
+  const bk = require('./util').backupFiles([encDb], 'trae-t0');
+  const tmpOut = encDb + '.new-' + process.pid;
+  encryptDb(plainFile, tmpOut, encKey, salt);
+  fs.renameSync(tmpOut, encDb);
+  try { fs.rmSync(plainFile, { force: true }); } catch { }
+  return { id: newSid, path: encDb, count, backup: bk.dir, resumeCommand: `Trae（重新打开）会话列表选择「${src.session_title || newSid.slice(0, 8)}」` };
+}
+function insertRowPlain(db, table, cols, row) {
+  const names = cols.filter((n) => row[n] !== undefined);
+  db.prepare(`INSERT INTO ${'"' + table.replace(/"/g, '""') + '"'} (${names.map((n) => '"' + n + '"').join(',')}) VALUES (${names.map(() => '?').join(',')})`).run(...names.map((n) => row[n]));
+}
+
+// T1：原生注入（明文库注入 → 整库重加密 → 原子替换；Trae 必须已退出）
+function writeSession(msx, { cwd, baseDir } = {}) {
+  cwd = cwd || msx.project?.cwd;
+  const encDb = dbPath(baseDir);
+  if (!fs.existsSync(encDb)) throw new Error('Trae database.db 不存在: ' + encDb);
+  const got = getPlainDb(encDb);
+  const plainFile = got.dbFile, salt = got.salt, encKey = got.encKey;
+  if (got.stale) throw new Error('Trae 数据已有更新而本地无当前密钥——请启动 Trae（打开 AI 面板）后重试，以基于最新数据写入');
+  if (isDefaultRealDb(baseDir, encDb) && traeRunning()) throw new Error('检测到 Trae 正在运行：注入前请先完全退出 Trae（密钥已在本会话缓存，退出后直接重试即可）');
+  const loss = [...(msx.loss || [])];
+  const entries = msx.entries || [];
+  if (!entries.length) throw new Error('没有可写入的内容条目（过滤条件排除了全部内容）');
+  if (!got.decrypted) throw new Error('Trae 目标库已是明文（未加密），该写入路径未实现——请确认指向的是加密的 database.db');
+  const db = new DatabaseSync(plainFile);
+  const title = (msx.source && msx.source.title) || '导入的会话';
+  let newSid = null;
+  try {
+    db.exec('PRAGMA busy_timeout=4000');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      newSid = crypto.randomUUID();
+      insertSession(db, { sessionId: newSid, cwd, title, entries, sourceAgent: msx.source?.agent });
+      db.exec('COMMIT');
+    } catch (e) { try { db.exec('ROLLBACK'); } catch { } throw e; }
+  } finally { db.close(); }
+  const bk = require('./util').backupFiles([encDb], 'trae-t1');
+  const tmpOut = encDb + '.new-' + process.pid;
+  encryptDb(plainFile, tmpOut, encKey, salt);
+  fs.renameSync(tmpOut, encDb);
+  try { fs.rmSync(plainFile, { force: true }); } catch { }
+  return {
+    id: newSid, path: encDb, count: entries.length, loss,
+    resumeCommand: `Trae（重新打开 ${cwd}）会话列表选择「${title}」`,
+    notes: ['注入会话在 Trae 会话列表的可见性依赖 Trae 版本的表结构，未经全部版本验证——写入前已自动备份原库'],
+  };
 }
 
 // ---------- 只读：列表 / 详情 ----------
@@ -352,4 +562,4 @@ function doctor(baseDir) {
   };
 }
 
-module.exports = { listSessions, readSession, doctor, dbPath, findDbs };
+module.exports = { listSessions, readSession, doctor, dbPath, findDbs, writeSession, copySession, encryptDb, insertSession, getPlainDb, __keyCache: keyCache };

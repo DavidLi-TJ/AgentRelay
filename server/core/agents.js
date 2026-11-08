@@ -38,7 +38,7 @@ const META = {
   cursor: { id: 'cursor', name: 'Cursor', vendor: 'Anysphere', color: '#6c7ee1', cli: 'cursor-agent', experimental: true, cap: { t0: 0, t1: 1 } },
   doubao: { id: 'doubao', name: '豆包工作', vendor: 'ByteDance 字节跳动', color: '#3b6dfd', cli: null, experimental: true, cap: { t0: 0, t1: 0 }, note: '会话存于应用内 IndexedDB/云端，无本地原生存储；仅支持 T2 逐字转写写入其项目目录' },
   hermes: { id: 'hermes', name: 'Hermes Agent', vendor: 'Nous Research', color: '#9b7cff', cli: 'hermes', hideIfMissing: true, cap: { t0: 1, t1: 1 } },
-  trae: { id: 'trae', name: 'Trae', vendor: 'ByteDance 字节跳动', color: '#2b6cb0', cli: null, hideIfMissing: true, cap: { t0: 0, t1: 0 }, note: '只读源：密钥从运行中的 Trae 进程内存提取（读取时 Trae 需启动）；目标侧维持 T2 转写' },
+  trae: { id: 'trae', name: 'Trae', vendor: 'ByteDance 字节跳动', color: '#2b6cb0', cli: null, hideIfMissing: true, cap: { t0: 1, t1: 1 }, note: 'SQLCipher 解密：读取时 Trae 需启动（密钥在进程内存）；注入/复制时 Trae 需完全退出（写前自动备份）' },
 };
 const ADAPTERS = { claude, codex, zcode, workbuddy, opencode, gemini, pi, openclaw, dsh, vscode, cursor, doubao, hermes, trae };
 

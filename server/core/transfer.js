@@ -68,6 +68,9 @@ function backupTargetsFor(targetAgent, baseDir, cwd) {
   } else if (targetAgent === 'hermes') {
     const hm = require('./hermes');
     for (const ext of ['', '-wal', '-shm']) files.push(hm.dbPath(baseDir) + ext);
+  } else if (targetAgent === 'trae') {
+    const tr = require('./trae');
+    files.push(tr.dbPath(baseDir));
   } else if (targetAgent === 'cursor') {
     // 只快照目标工作区的小库（UPDATE ItemTable 的落点）。
     // 全局库（数 GB，社区有 30GB+ 案例）的写入是纯 INSERT 新键、不触碰既有行，不做整库 VACUUM。
@@ -265,6 +268,13 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
         result.id = r.id; result.path = r.path; result.count = r.count;
         result.resumeCommand = r.resumeCommand || `hermes sessions list 选择「${result.title}」`;
         result.notes.push('T0 = 同源原生复制：内容原样保留（仅替换会话 id），源会话不变');
+      } else if (targetAgent === 'trae') {
+        const tr = require('./trae');
+        if (!dbFileOverride) runBackupIfEnabled('trae', tgtBase, 'trae-t0', result, backup, cwd);
+        const r = tr.copySession(sessionId, { baseDir: tgtBase });
+        result.id = r.id; result.path = r.path; result.count = r.count;
+        result.resumeCommand = r.resumeCommand;
+        result.notes.push('T0 = 同源原生复制：内容原样保留（仅替换会话 id），源会话不变');
       } else {
         // 通用文件型 T0：gemini / pi / openclaw / vscode / dsh 的 rawCopy（同源纯复制，只新建文件、无需备份）
         const r = await ad.rawCopy(sessionId, { baseDir: tgtBase });
@@ -326,6 +336,13 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
         result.id = r.id; result.path = r.path; result.loss = r.loss; result.count = r.count;
         result.resumeCommand = `opencode（在项目 ${cwd} 打开）→ 会话列表选择「${msx.source.title}」（新会话 id: ${r.id}）`;
         result.notes.push('OpenCode 无公开 CLI resume 语法，已写入其原生 opencode.db（session/message/part 表），桌面端/CLI 会话列表可见');
+      } else if (targetAgent === 'trae') {
+        const tr = require('./trae');
+        runBackupIfEnabled('trae', tgtBase, 'trae-t1', result, backup, cwd);
+        const r = tr.writeSession(msx, { cwd, baseDir: tgtBase });
+        result.id = r.id; result.path = r.path; result.loss = r.loss; result.count = r.count;
+        result.resumeCommand = r.resumeCommand;
+        result.notes.push(...(r.notes || []));
       } else {
         // 通用 T1 派发：adapter 声明 writeSession 即支持（gemini/pi/openclaw/vscode/dsh/cursor）
         const ad = agents.ADAPTERS[targetAgent];
