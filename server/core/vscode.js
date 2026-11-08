@@ -90,7 +90,7 @@ function doctor(baseDir) {
     ok: sessionFiles > 0,
     storage: root,
     sessionFiles,
-    note: sessionFiles > 0 ? '只读源（T2 可作为目标）；工具输出 VS Code 不持久化（已核实 transcripts/workspace/global state.vscdb/memento 全部位置，仅存于渲染进程内存）' : '未发现 Copilot Chat transcripts',
+    note: sessionFiles > 0 ? '工具输出 VS Code 不持久化（已核实 transcripts/workspace/global state.vscdb/memento 全部位置，仅存于渲染进程内存），接力后的会话该处为占位' : '未发现 Copilot Chat transcripts',
   };
 }
 

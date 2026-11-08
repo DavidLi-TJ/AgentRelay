@@ -58,11 +58,19 @@ function pruneTraeCache() {
     const files = fs.readdirSync(dir).filter((f) => f.startsWith('trae-dec-') && f.endsWith('.db')).map((f) => {
       const p = path.join(dir, f);
       const st2 = fs.statSync(p);
-      return { p, m: st2.mtimeMs, isFile: st2.isFile() };
+      return { p, m: st2.mtimeMs, isFile: st2.isFile(), tag: f.slice(9, 17) }; // tag = md5(库路径) 前 8 位
     }).filter((x) => x.isFile)
       .sort((a, b) => (b.m - a.m) || b.p.localeCompare(a.p));
-    for (const x of files.slice(2)) {
-      try { fs.rmSync(x.p, { force: true }); } catch { }
+    // 按库 tag 分组，各保留最新 2 份（本机可能同时有 Trae CN / Trae / SOLO 多套库）
+    const byTag = new Map();
+    for (const x of files) {
+      if (!byTag.has(x.tag)) byTag.set(x.tag, []);
+      byTag.get(x.tag).push(x);
+    }
+    for (const [, list] of byTag) {
+      for (const x of list.slice(2)) {
+        try { fs.rmSync(x.p, { force: true }); } catch { }
+      }
     }
     // 孤儿 -wal/-shm 一并清理：对应主库已不存在（或已删）的边车文件
     const alive = new Set(files.slice(0, 2).map((x) => x.p));

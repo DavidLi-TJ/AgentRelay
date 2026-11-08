@@ -27,11 +27,13 @@ function findDbs() {
 }
 const dbPath = (baseDir) => {
   if (baseDir) {
-    if (fs.statSync(baseDir).isFile?.()) return baseDir;
+    let st = null;
+    try { st = fs.statSync(baseDir); } catch { }
+    if (st && st.isFile()) return baseDir;
     return path.join(baseDir, 'database.db');
   }
   const all = findDbs();
-  return all.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] || dataRoots()[0] + '\\database.db';
+  return all.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] || path.join(dataRoots()[0], 'database.db');
 };
 
 // ---------- 密钥：进程内存扫描（PowerShell P/Invoke，HMAC 校验） ----------

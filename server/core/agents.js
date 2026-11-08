@@ -140,6 +140,7 @@ const _listCache = new Map(); // instanceId → { at, sessions }
 function listInstanceSessions(inst, { refresh = false } = {}) {
   const hit = _listCache.get(inst.instanceId);
   if (!refresh && hit && Date.now() - hit.at < 30000) return hit.sessions;
+  if (typeof ADAPTERS[inst.type].listSessions !== 'function') throw new Error(`agent ${inst.type} 无本地会话列表（正文在应用内/云端）`);
   const sessions = ADAPTERS[inst.type].listSessions(inst.baseDir) || [];
   _listCache.set(inst.instanceId, { at: Date.now(), sessions });
   return sessions;
@@ -201,6 +202,7 @@ async function readMsx(type, sessionId) {
     if (full.size === 1) sid = [...full][0];
     else if (full.size > 1) throw new Error(`id 前缀 "${sid}" 命中 ${full.size} 个会话，请提供更长的前缀或完整 id（list --verbose 可看）`);
   }
+  if (!ADAPTERS[type].readSession) throw new Error(`agent ${type} 暂不支持读取（如 doubao：正文在应用内/云端，仅可作 T2 目标）`);
   let lastErr = null;
   for (const inst of insts) {
     try {

@@ -218,9 +218,11 @@ async function ensureSessions() {
       state.sessionsByInstance[inst.id] = await api(`/api/sessions?instance=${encodeURIComponent(inst.id)}`);
       state.instStatus[inst.id] = 'ok';
       saveSessionCache();
-    } catch {
+    } catch (e) {
       state.instStatus[inst.id] = 'error';
-      state.sessionsByInstance[inst.id] = [];
+      state.instErrors = state.instErrors || {};
+      state.instErrors[inst.id] = e.message || '';
+      delete state.sessionsByInstance[inst.id];
     }
     renderRail();
     if (!state.searchActive) renderSessions();
@@ -228,6 +230,8 @@ async function ensureSessions() {
   }
 }
 function instStatusOf(inst) {
+  // error 优先于空数组：加载失败时不能被 catch 写入的 [] 覆盖成"正常 0 个会话"（审计 P2-1）
+  if (state.instStatus[inst.id] === 'error') return 'error';
   if (state.sessionsByInstance[inst.id]) return 'ok';
   return state.instStatus[inst.id] || '';
 }
@@ -270,9 +274,11 @@ async function loadInstanceSessionsIfNeeded(instanceId) {
   try {
     state.sessionsByInstance[instanceId] = await api(`/api/sessions?instance=${encodeURIComponent(instanceId)}`);
     state.instStatus[instanceId] = 'ok';
-  } catch {
+  } catch (e) {
     state.instStatus[instanceId] = 'error';
-    state.sessionsByInstance[instanceId] = [];
+    state.instErrors = state.instErrors || {};
+    state.instErrors[instanceId] = e.message || '';
+    delete state.sessionsByInstance[instanceId]; // 失败不能写空数组冒充"0 个会话"
   }
   renderRail(); renderSessions();
   if (state.relay) renderRelaySrcList();
@@ -290,6 +296,12 @@ function renderSessions() {
   if (q) list = list.filter((s) => (s.title || '').toLowerCase().includes(q) || (s.cwd || '').toLowerCase().includes(q));
   list.sort((a, b) => String(b.tsLast || '').localeCompare(String(a.tsLast || '')));
   state.sessions = list;
+  // 加载失败透出：服务端报错原文（如"请启动 Trae…"）直达用户，而不是冒充"0 个会话"（审计 P2-1）
+  if (state.currentAgent !== 'all' && state.instStatus[state.currentAgent] === 'error' && (state.instErrors || {})[state.currentAgent]) {
+    $('#list-count').textContent = t('加载失败');
+    $('#session-list').innerHTML = `<div class="empty-detail" style="padding:20px 16px"><div class="muted">${esc(state.instErrors[state.currentAgent])}</div></div>`;
+    return;
+  }
   const pending = state.instances.filter((i) => instStatusOf(i) === 'loading').length;
   $('#list-count').textContent = `${list.length} ${t('个会话')}` + (pending ? ` · ${t('正在加载')} ${pending}…` : '');
   const box = $('#session-list');
