@@ -18,6 +18,7 @@ const dsh = require('./dsh');
 const vscode = require('./vscode');
 const cursor = require('./cursor');
 const doubao = require('./doubao');
+const hermes = require('./hermes');
 const { lastCompactionIndex } = require('./msx');
 
 // cap = 原生接力能力（单一事实来源；transfer/GUI/CLI/MCP 均读这里，勿再散落硬编码清单）
@@ -35,8 +36,9 @@ const META = {
   vscode: { id: 'vscode', name: 'VS Code Copilot', vendor: 'GitHub (open source)', color: '#8957e5', cli: null, experimental: true, cap: { t0: 1, t1: 1 } },
   cursor: { id: 'cursor', name: 'Cursor', vendor: 'Anysphere', color: '#6c7ee1', cli: 'cursor-agent', experimental: true, cap: { t0: 0, t1: 1 } },
   doubao: { id: 'doubao', name: '豆包工作', vendor: 'ByteDance 字节跳动', color: '#3b6dfd', cli: null, experimental: true, cap: { t0: 0, t1: 0 }, note: '会话存于应用内 IndexedDB/云端，无本地原生存储；仅支持 T2 逐字转写写入其项目目录' },
+  hermes: { id: 'hermes', name: 'Hermes Agent', vendor: 'Nous Research', color: '#9b7cff', cli: 'hermes', hideIfMissing: true, cap: { t0: 1, t1: 1 } },
 };
-const ADAPTERS = { claude, codex, zcode, workbuddy, opencode, gemini, pi, openclaw, dsh, vscode, cursor, doubao };
+const ADAPTERS = { claude, codex, zcode, workbuddy, opencode, gemini, pi, openclaw, dsh, vscode, cursor, doubao, hermes };
 
 // DSH 的 T0/T1 依赖 Node ≥23.8 的内置 zstd（写入要压缩、读取要解压）；低版本直接降级到 T2，
 // 避免 GUI 按静态 cap 推荐 T1 后才在写入时报错（审核 P2）
@@ -267,6 +269,7 @@ function addCustomInstance({ type, name, dataDir }) {
       vscode: 'workspaceStorage/*/GitHub.copilot-chat/transcripts',
       gemini: 'tmp/*/chats 目录', pi: 'sessions 目录（jsonl）', openclaw: 'agents 目录（jsonl）',
       doubao: 'User Data 目录（豆包桌面端，仅 T2 目标）',
+      hermes: 'state.db（Hermes Agent 数据目录，如 %LOCALAPPDATA%\\hermes 或 HERMES_HOME）',
       cursor: 'User/globalStorage/state.vscdb（Cursor 数据目录的上级）',
     }[type] || '存储目录';
     throw new Error(`在 ${abs} 下未找到 ${type} 的存储（应有 ${expect}）`);

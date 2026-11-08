@@ -21,6 +21,7 @@ const gemini = require('../server/core/gemini');
 const pi = require('../server/core/pi');
 const openclaw = require('../server/core/openclaw');
 const dsh = require('../server/core/dsh');
+const hermes = require('../server/core/hermes');
 const workbuddy = require('../server/core/workbuddy');
 const bundle = require('../server/core/bundle');
 const transfer = require('../server/core/transfer');
@@ -91,20 +92,39 @@ function wbSchema(base) {
 
   // ---------- 1. 各写入器自产夹具 + 读回 ----------
   const written = {}; // agent → sessionId
+  // hermes 夹具：与真实 state.db（schema_version=32）关键表同构的最小库（隔离在假 HOME）
+  const hmHome = path.join(FAKE, '.hermes');
+  fs.mkdirSync(hmHome, { recursive: true });
+  {
+    const { DatabaseSync } = require('node:sqlite');
+    const hmDb = new DatabaseSync(path.join(hmHome, 'state.db'));
+    hmDb.exec(`
+      CREATE TABLE schema_version (version INTEGER);
+      INSERT INTO schema_version VALUES (32);
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, created_source TEXT, model TEXT, started_at REAL, ended_at REAL,
+        cwd TEXT, title TEXT, title_source TEXT, profile_name TEXT, message_count INTEGER, tool_call_count INTEGER,
+        last_activity_at REAL, input_tokens INTEGER, output_tokens INTEGER, hidden INTEGER DEFAULT 0, archived INTEGER DEFAULT 0);
+      CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT, tool_call_id TEXT,
+        tool_calls TEXT, tool_name TEXT, timestamp REAL, finish_reason TEXT, active INTEGER DEFAULT 1, compacted INTEGER DEFAULT 0, reasoning_content TEXT);
+      CREATE TABLE session_model_usage (session_id TEXT, model TEXT);
+    `);
+    hmDb.close();
+  }
   const writers = [
     ['claude', claude], ['codex', codex], ['gemini', gemini], ['pi', pi], ['openclaw', openclaw],
+    ['hermes', hermes, { baseDir: hmHome }],
   ];
   if (HAS_ZSTD) writers.push(['dsh', dsh]);
-  for (const [name, mod] of writers) {
+  for (const [name, mod, extra] of writers) {
     try {
       // claude 写入器按 source.agent==='claude-code' 判定同厂商（保留思考块）——夹具需用其规范源 id
       const srcAgent = name === 'claude' ? 'claude-code' : name;
       const sid = 'ci-' + name + '-' + randomUUID().slice(0, 8);
-      const r = await mod.writeSession(synthMsx(srcAgent, sid), { cwd: PROJ });
-      const list = mod.listSessions();
+      const r = await mod.writeSession(synthMsx(srcAgent, sid), { cwd: PROJ, ...(extra || {}) });
+      const list = mod.listSessions(extra ? extra.baseDir : undefined);
       const row = list.find((s) => s.id === r.id);
       if (!check(`${name} 写入→列表可见`, !!row)) continue;
-      const back = await mod.readSession(r.id);
+      const back = await mod.readSession(r.id, extra ? extra.baseDir : undefined);
       check(`${name} 读回`, back.entries.length >= 4 && back.stats.userTurns >= 1 && back.stats.toolCalls >= 1,
         `entries=${back.entries.length}`);
       written[name] = r.id;

@@ -181,6 +181,24 @@ const nowIso = () => new Date().toISOString();
   const pi = require('../server/core/pi');
   const openclaw = require('../server/core/openclaw');
   const dsh = require('../server/core/dsh');
+  const hermes = require('../server/core/hermes');
+  // hermes 夹具：与真实 state.db（schema_version=32）关键表同构的最小库（列探测逻辑按实际列集工作）
+  const hmHome = path.join(SANDBOX, 'hermes-home');
+  fs.mkdirSync(hmHome, { recursive: true });
+  {
+    const hmDb = new (require('node:sqlite').DatabaseSync)(path.join(hmHome, 'state.db'));
+    hmDb.exec(`
+      CREATE TABLE schema_version (version INTEGER);
+      INSERT INTO schema_version VALUES (32);
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, created_source TEXT, model TEXT, started_at REAL, ended_at REAL,
+        cwd TEXT, title TEXT, title_source TEXT, profile_name TEXT, message_count INTEGER, tool_call_count INTEGER,
+        last_activity_at REAL, input_tokens INTEGER, output_tokens INTEGER, hidden INTEGER DEFAULT 0, archived INTEGER DEFAULT 0);
+      CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT, tool_call_id TEXT,
+        tool_calls TEXT, tool_name TEXT, timestamp REAL, finish_reason TEXT, active INTEGER DEFAULT 1, compacted INTEGER DEFAULT 0, reasoning_content TEXT);
+      CREATE TABLE session_model_usage (session_id TEXT, model TEXT);
+    `);
+    hmDb.close();
+  }
   const sbGemini = path.join(SANDBOX, 'gemini-home');
   const sbPi = path.join(SANDBOX, 'pi-home');
   const sbClaw = path.join(SANDBOX, 'openclaw-home');
@@ -217,6 +235,21 @@ const nowIso = () => new Date().toISOString();
   const dshBack = await dsh.readSession(rDsh.id, sbDsh);
   if (dshBack.stats.userTurns === 0 || dshBack.stats.toolCalls === 0) throw new Error('dsh 回读缺内容');
   console.log(`  claude→dsh: 回读=${dshBack.stats.entries}条 tools=${dshBack.stats.toolCalls} (zstd)`);
+
+  // codex → hermes（合成 state.db：T1 注入 + 读回 + T0 同库克隆）
+  const rHm = hermes.writeSession(codexMsx, { cwd: projA, baseDir: hmHome });
+  const hmList = hermes.listSessions(hmHome);
+  if (!hmList.some((s) => s.id === rHm.id)) throw new Error('hermes 列表未发现注入会话');
+  const hmBack = await hermes.readSession(rHm.id, hmHome);
+  if (hmBack.stats.userTurns === 0 || hmBack.stats.toolCalls === 0) throw new Error('hermes 回读缺内容');
+  if (!hmBack.entries.some((e) => (e.blocks || []).some((b) => b.type === 'thinking'))) throw new Error('hermes reasoning_content 未回读为思考块');
+  const hmT0 = hermes.copySession(rHm.id, { baseDir: hmHome });
+  const hmDbChk = new (require('node:sqlite').DatabaseSync)(path.join(hmHome, 'state.db'));
+  const hmSrcMsgs = hmDbChk.prepare('SELECT count(*) c FROM messages WHERE session_id = ?').get(rHm.id).c;
+  const hmNewMsgs = hmDbChk.prepare('SELECT count(*) c FROM messages WHERE session_id = ?').get(hmT0.id).c;
+  hmDbChk.close();
+  if (!hmSrcMsgs || hmNewMsgs !== hmSrcMsgs) throw new Error('hermes T0 克隆行数不一致');
+  console.log(`  codex→hermes: 回读=${hmBack.stats.entries}条 tools=${hmBack.stats.toolCalls} T0=${hmNewMsgs}行`);
 
   // T0 原生复制（gemini/pi/openclaw/dsh 沙盒内 + 源不可变断言）
   const dshSrcBefore = fs.statSync(rDsh.path).mtimeMs;

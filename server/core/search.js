@@ -32,6 +32,20 @@ async function searchAll({ q, instanceId = null, limit = 60, perInstanceCap = 20
             results.push({ agent: type, instance: inst.id, sessionId: r.session_id, title: (sess && sess.title) || r.session_id, cwd: (sess && sess.directory) || '', hits: r.hits, sample: r.sample });
           }
         } finally { db.close(); }
+      } else if (type === 'hermes') {
+        const hm = require('./hermes');
+        const dbp = hm.dbPath(baseDir);
+        if (!fs.existsSync(dbp)) continue;
+        const { DatabaseSync } = require('node:sqlite');
+        const db = new DatabaseSync(hm.getReadDbFile(baseDir));
+        try {
+          const like = '%' + q.replace(/[%_]/g, '') + '%';
+          const rows = db.prepare("SELECT m.session_id, count(*) hits, substr(m.content, 1, 200) sample FROM messages m WHERE m.content LIKE ? AND m.active = 1 GROUP BY m.session_id ORDER BY hits DESC LIMIT ?").all(like, perInstanceCap);
+          for (const r of rows) {
+            const sess = db.prepare('SELECT title, cwd FROM sessions WHERE id = ?').get(r.session_id);
+            results.push({ agent: type, instance: inst.id, sessionId: r.session_id, title: (sess && sess.title) || r.session_id, cwd: (sess && sess.cwd) || '', hits: r.hits, sample: r.sample });
+          }
+        } finally { db.close(); }
       } else {
         const list = agents.listInstanceSessions(inst);
         for (const sess of list) {
