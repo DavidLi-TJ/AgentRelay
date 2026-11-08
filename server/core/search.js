@@ -15,8 +15,10 @@ async function searchAll({ q, instanceId = null, limit = 60, perInstanceCap = 20
   if (instanceId) insts = insts.filter((i) => i.id === instanceId);
   for (const inst of insts) {
     if (Date.now() > deadline) break;
+    const type = inst.type;
+    // trae：单一 SQLCipher 库（解密成本高）；doubao：正文在 IndexedDB/云端 —— 均不参与正文搜索
+    if (type === 'trae' || type === 'doubao') continue;
     try {
-      const type = inst.type;
       const baseDir = inst.baseDir;
       if (type === 'zcode' || type === 'opencode') {
         const { DatabaseSync } = require('node:sqlite');

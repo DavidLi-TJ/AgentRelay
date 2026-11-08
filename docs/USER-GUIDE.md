@@ -175,7 +175,7 @@ Native (T0/T1) writes into DSH need the zstd support built into Node ≥ 23.8. O
 
 <details>
 <summary>What about Trae / Doubao Work?</summary>
-Trae encrypts its agent database with SQLCipher and the key lives inside Trae's own backend, so there is no safe native write. Doubao Work keeps its transcripts inside the app's IndexedDB/cloud with no local session store. For both, a T2 relay (verbatim transcript + kickoff prompt written into the target project folder) still works — paste the prompt into a new session there.
+Trae works as a <strong>read-only source</strong>: its agent database is SQLCipher-encrypted, but AgentRelay extracts the runtime key from the running Trae process (page-1 HMAC verified) and decrypts pages with Node's own crypto — so Trae must be running while the key scan happens. Doubao Work keeps its transcripts inside the app's IndexedDB/cloud with no local session store. For both, a T2 relay (verbatim transcript + kickoff prompt written into the target project folder) is the way to hand work over.
 </details>
 
 <details>
