@@ -79,7 +79,7 @@ Which tier for which target? The app marks it on the relay page, and the short v
 - Any other supported target → **T1**, the default. Native injection; resume or the session list picks it up. Experimental writers are flagged in the UI.
 - **T2** stays as the universal fallback for anything without a native writer.
 
-Cross-agent relays cannot replay thinking-block signatures (that requires the vendor's private key), so signatures are kept as plain text and noted in the `loss[]` manifest. T0 has no loss. Every relay result carries a fidelity manifest: tier, kept entries/tools/thinking counts, and the list of omissions.
+Cross-agent relays cannot replay thinking-block signatures (that requires the vendor's private key), so thinking content is preserved as plain `【思考】`-prefixed text blocks instead — nothing is dropped, only the unverifiable signature is gone. T0 has no loss. Every relay result carries a fidelity manifest: tier, kept entries/tools/thinking counts, and the list of omissions.
 
 ## Cross-device relay
 
@@ -120,7 +120,7 @@ Experimental adapters are implemented from official source schemas (Cursor's fro
 
 Agent sessions drift. An agent loops on "let me do it", a tool result pollutes the context, a wrong turn poisons everything after it. The detail page has an **Edit** mode for that: filter entries by keyword, rewrite or remove entries, insert new ones (user / assistant / a tool-call pair, or paste an exported ARX fragment from another agent to batch-merge), and copy any entry verbatim. Saving offers two modes: **save in place** (claude and zcode — writes the session's own storage, auto-backup first, takes effect the next time that agent opens the session) or **save as a new session** (every agent, original untouched). Editing is your explicit action — relays still never modify a source session. Any session can also be exported as a **verbatim Markdown transcript** (your selection and redaction apply, tool calls and thinking render as collapsible blocks) or as an ARX JSON file — the two buttons sit side by side under the preview.
 
-Three honest caveats: an in-place claude save re-synthesizes the transcript, so sidechain/system-injection lines that the format cannot round-trip are dropped (the backup is the recovery); the editor reaches the first 400 loaded entries (click **Load more** to bring further ones in); and a pasted tool pair is kept adjacent for exactly this reason — a `tool_result` far from its `tool_use` makes `claude --resume` fail.
+Three honest caveats: an in-place claude save re-synthesizes the transcript — sidechain (subagent), attachment, and metadata lines are now preserved verbatim at their original positions, and only lines whose anchor entry you deleted move to the end of the file; the editor reaches the first 400 loaded entries (click **Load more** to bring further ones in); and a pasted tool pair is kept adjacent for exactly this reason — a `tool_result` far from its `tool_use` makes `claude --resume` fail.
 
 The sessions toolbar has a **duplicate finder**: sessions with the same title, size and project across all agents are grouped (migration testing leaves copies behind), one click jumps to each. Sub-agent sessions (zcode) show up under their parent in the detail view. And a settings switch turns auto-loading of session lists off entirely — click an agent to scan it on demand, disabled agents are never touched.
 

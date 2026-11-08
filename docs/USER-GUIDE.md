@@ -70,7 +70,7 @@ Honest caveats, so nothing surprises you:
 
 - The editor reaches the **first 400 loaded entries**; click *next 400* to bring further ones into reach before editing them.
 - A `tool_result` far away from its `tool_use` can make `claude --resume` fail. The editor keeps pasted tool pairs adjacent for exactly this reason — don't delete one half of a pair.
-- An in-place Claude save re-synthesizes the transcript, so sidechain/system-injection lines the format cannot round-trip are dropped. The automatic backup is the recovery path.
+- An in-place Claude save re-synthesizes the transcript. Sidechain (subagent), attachment, and metadata lines are preserved verbatim at their original positions; only lines whose anchor entry you deleted move to the end of the file. The automatic backup remains the recovery path.
 - Editing always happens because **you** clicked it. Relays never modify a source session.
 
 ## 5. Relay view — the main event

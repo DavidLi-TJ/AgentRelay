@@ -188,6 +188,7 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
       arx: 1, id: randomUUID(), created_at: nowISO(),
       source: src.source, project: { cwd: cwd || src.project.cwd }, env: src.env,
       stats: computeStats(entries), entries, compactions: src.compactions || [], loss,
+      _passthrough: src._passthrough || [],
     };
     if (options.redact) msx = redactMsx(msx);
     result.stats = msx.stats;

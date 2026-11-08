@@ -162,13 +162,22 @@ function readSession(sessionIdOrFile, baseDir) {
   let version = null;
   let model = null;
   let recordedTokens = 0;
+  // 原样保真通道：sidechain/attachment/元数据等"不成条目"的行全部记录（锚定其后第一条主链行），
+  // 就地保存/另存时随 writeSession 逐行写回——不再因重合成而丢失
+  const ptRaw = [];
+  const mainList = [];
+  lines.forEach((o, idx) => {
+    if (!o.isSidechain && (o.type === 'user' || o.type === 'assistant' || o.type === 'system')) mainList.push({ idx, uuid: o.uuid || null });
+  });
+  const idxOf = new Map(lines.map((o, i) => [o, i]));
   for (const o of lines) {
+    const idx = idxOf.get(o);
     const t = o.type;
     if (o.cwd && !cwd) cwd = o.cwd;
     if (o.version && !version) version = o.version;
     if (t === 'summary' && !title) title = o.summary || '';
     if (t === 'ai-title' && !title) title = o.aiTitle || '';
-    if (o.isSidechain) { sidechainCount++; continue; }
+    if (o.isSidechain) { sidechainCount++; ptRaw.push({ idx, line: o }); continue; }
     if (t === 'user') {
       if (o.isCompactSummary) {
         // /compact 产生的压缩摘要：计入 compactions（摘要文本仍作为普通条目保留）
@@ -207,12 +216,17 @@ function readSession(sessionIdOrFile, baseDir) {
         id: o.uuid || `row_${entries.length}`, ts: o.timestamp, role: 'meta', kind: 'note',
         blocks: [{ type: 'text', text: o.content || '' }], meta: { subtype: o.subtype },
       });
-    } else if (t === 'attachment') {
-      loss.push(`跳过 1 条 attachment 行（${(o.attachment && o.attachment.type) || '未知'}，hook/插件内部事件）`);
+    } else if (t !== 'summary' && t !== 'ai-title' && t !== 'last-prompt') {
+      // attachment / mode / permission-mode / file-history-snapshot / 未来新增类型：原样保真
+      ptRaw.push({ idx, line: o });
+      if (t === 'attachment') loss.push(`1 条 attachment 行（${(o.attachment && o.attachment.type) || '未知'}，hook/插件内部事件）将原样写回`);
     }
-    // mode / permission-mode / last-prompt / file-history-snapshot 等元数据行：不入 entries
   }
-  if (sidechainCount) loss.push(`已按主链读取，排除 ${sidechainCount} 条 sidechain（子代理）行`);
+  const passthrough = ptRaw.map(({ idx, line }) => {
+    const next = mainList.find((m) => m.idx > idx);
+    return { after: next ? next.uuid : '__END__', line };
+  });
+  if (sidechainCount) loss.push(`${sidechainCount} 条 sidechain（子代理）行将原样保留（保存时随行写回）`);
   const stats = {
     entries: entries.length,
     userTurns: entries.filter((e) => e.role === 'user' && e.kind === 'text').length,
@@ -237,6 +251,7 @@ function readSession(sessionIdOrFile, baseDir) {
     entries,
     compactions,
     loss,
+    _passthrough: passthrough,
     _fileStat: { size: st.size, mtimeMs: st.mtimeMs },
   };
 }
@@ -253,6 +268,8 @@ function claudeBlocksFrom(blocks) {
   return out;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function writeSession(msx, { cwd, newId, baseDir } = {}) {
   cwd = cwd || msx.project?.cwd;
   if (!cwd) throw new Error('缺少目标项目 cwd');
@@ -261,30 +278,54 @@ function writeSession(msx, { cwd, newId, baseDir } = {}) {
   ensureDir(dir);
   const file = path.join(dir, id + '.jsonl');
   const loss = [...(msx.loss || [])];
-  // 跨厂商思考块签名不可重放（需要源厂商私钥），带空签名写入可能让 resume 报 400——直接剥离
+  // 跨厂商思考块签名不可重放（需要源厂商私钥），但内容不丢：转为【思考】前缀的普通文本块（空签名直接写会让 resume 报 400）
   let entries = msx.entries || [];
   if ((msx.source?.agent || '') !== 'claude-code' && entries.some((e) => (e.blocks || []).some((b) => b.type === 'thinking'))) {
     entries = entries
-      .map((e) => ({ ...e, blocks: (e.blocks || []).filter((b) => b.type !== 'thinking') }))
+      .map((e) => ({
+        ...e,
+        blocks: (e.blocks || []).map((b) => (b.type === 'thinking' ? { type: 'text', text: '【思考】' + (b.text || '') } : b)),
+      }))
       .filter((e) => (e.blocks || []).length > 0);
-    loss.push('Claude 目标：跨厂商思考块签名无法重放，已剥离全部 thinking 块');
+    loss.push('Claude 目标：跨厂商思考块无官方签名，已转为【思考】前缀的普通文本块保留内容');
   }
   const lines = [];
   let prevUuid = null;
   let firstUserText = '';
   let count = 0;
+  // 原样保真通道：读取阶段收集的 sidechain/attachment/元数据行，按锚点交错写回（uuid 保留时锚点精确成立）
+  const pending = Array.isArray(msx._passthrough) ? msx._passthrough.map((p) => ({ ...p })) : [];
+  const flushFor = (anchor) => {
+    for (let i = 0; i < pending.length; i++) {
+      if (pending[i].after === anchor) {
+        const line = { ...pending[i].line };
+        if (line.sessionId !== undefined) line.sessionId = id;
+        if (line.session_id !== undefined) line.session_id = id;
+        lines.push(line); count++;
+        pending.splice(i, 1); i--;
+      }
+    }
+  };
+  flushFor(null); // 文件头部的锚点（无主链前驱）
   for (const e of entries) {
     const ts = e.ts || nowISO();
     if (e.kind === 'compaction') { loss.push('Claude 目标：跳过 1 条 compaction 标记'); continue; }
-    if (e.role === 'meta' || e.role === 'system') {
-      loss.push(`Claude 目标：跳过 1 条 ${e.role} 条目（${(e.blocks?.[0]?.text || '').slice(0, 40)}…）`);
-      continue;
-    }
-    const uuid = randomUUID();
+    const uuid = UUID_RE.test(e.id || '') ? e.id : randomUUID();
+    if (UUID_RE.test(e.id || '')) flushFor(uuid); // 该行写盘前，先落锚定在它之前的保真行
     const common = {
       parentUuid: prevUuid, isSidechain: false, type: null, uuid, timestamp: ts,
       userType: 'external', entrypoint: 'cli', cwd, sessionId: id, version: CLAUDE_VERSION,
     };
+    if (e.role === 'meta') {
+      const content = (e.blocks || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('');
+      if (content) { lines.push({ ...common, type: 'user', isMeta: true, message: { role: 'user', content } }); prevUuid = uuid; count++; }
+      continue;
+    }
+    if (e.role === 'system') {
+      const content = (e.blocks || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('');
+      if (content) { lines.push({ ...common, type: 'system', content, subtype: (e.meta && e.meta.subtype) || undefined }); prevUuid = uuid; count++; }
+      continue;
+    }
     if (e.role === 'user' && e.kind === 'text') {
       const textParts = (e.blocks || []).filter((b) => b.type === 'text');
       if (!textParts.length) continue;
@@ -314,6 +355,18 @@ function writeSession(msx, { cwd, newId, baseDir } = {}) {
         },
       });
       prevUuid = uuid; count++;
+    }
+  }
+  // 尾部锚点 + 锚点条目已被用户删除的保真行：顺延到末尾保留（不静默丢弃）
+  if (pending.length) {
+    const orphan = pending.filter((p) => p.after !== '__END__').length;
+    if (orphan) loss.push(`${orphan} 条原文件保真行的锚点条目已被删除，顺延至末尾保留`);
+    flushFor('__END__');
+    for (const p of pending) {
+      const line = { ...p.line };
+      if (line.sessionId !== undefined) line.sessionId = id;
+      if (line.session_id !== undefined) line.session_id = id;
+      lines.push(line); count++;
     }
   }
   if (!count) throw new Error('没有可写入的内容条目（全部被过滤）');

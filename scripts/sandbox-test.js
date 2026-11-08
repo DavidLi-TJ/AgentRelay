@@ -501,6 +501,45 @@ const nowIso = () => new Date().toISOString();
   if (strayCopies.length) throw new Error('claude 就地保存产生了同 id 双副本');
   console.log(`  claude 就地编辑: slug 错位写回原位, 无双副本 ✓`);
 
+  // claude passthrough 保真：sidechain/attachment/元数据行在写入后原样保留（锚定与顺延两种路径都验）
+  const ptSource = {
+    arx: 1, id: 'pt-test', created_at: nowIso(),
+    source: { agent: 'claude-code', agent_version: null, session_id: 'pt-src', title: 'passthrough 测试' },
+    project: { cwd: projA }, env: { model: null },
+    stats: require('../server/core/msx').computeStats([]), entries: [
+      { id: '11111111-1111-4111-8111-111111111111', ts: nowIso(), role: 'user', kind: 'text', blocks: [{ type: 'text', text: '主链第一条' }], meta: {} },
+      { id: '22222222-2222-4222-8222-222222222222', ts: nowIso(), role: 'user', kind: 'text', blocks: [{ type: 'text', text: '主链第二条' }], meta: {} },
+    ], compactions: [], loss: [],
+    _passthrough: [
+      { after: '11111111-1111-4111-8111-111111111111', line: { type: 'user', isSidechain: true, uuid: 'aaaa1111-0000-4000-8000-000000000001', parentUuid: null, timestamp: nowIso(), message: { role: 'user', content: '子代理行' }, sessionId: 'old' } },
+      { after: '11111111-1111-4111-8111-111111111111', line: { type: 'file-history-snapshot', timestamp: nowIso(), messageId: 'm1' } },
+      { after: '__END__', line: { type: 'attachment', timestamp: nowIso(), attachment: { type: 'path' }, sessionId: 'old' } },
+    ],
+  };
+  const ptPath = claude.writeSession(ptSource, { cwd: projA, newId: 'pt-dst-test' });
+  const ptLines = fs.readFileSync(ptPath.path, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const ptSide = ptLines.filter((o) => o.isSidechain);
+  const ptSnap = ptLines.filter((o) => o.type === 'file-history-snapshot');
+  const ptAtt = ptLines.filter((o) => o.type === 'attachment');
+  const ptMainIdx = ptLines.findIndex((o) => o.uuid === '22222222-2222-4222-8222-222222222222');
+  const ptSideIdx = ptLines.findIndex((o) => o.isSidechain);
+  if (ptSide.length !== 1 || ptSnap.length !== 1 || ptAtt.length !== 1) throw new Error('passthrough 行数不符');
+  if (ptLines.find((o) => o.isSidechain).sessionId !== 'pt-dst-test') throw new Error('passthrough sessionId 未重写');
+  if (!(ptSideIdx > -1 && ptSideIdx < ptMainIdx)) throw new Error('锚定位置错误（sidechain 应在第二条主链之前）');
+  if (ptLines.findIndex((o) => o.type === 'attachment') < ptMainIdx) throw new Error('尾部锚点位置错误');
+  const ptBack = claude.readSession(ptPath.path);
+  if (!ptBack._passthrough || ptBack._passthrough.length !== 3) throw new Error('passthrough 读回不完整: ' + (ptBack._passthrough || []).length);
+  fs.rmSync(ptPath.path, { force: true });
+  console.log(`  claude passthrough: sidechain/元数据/attachment 原样保留, 锚点与尾部顺延正确, 读回=3 ✓`);
+
+  // 跨厂商思考块：转为【思考】文本保留（内容不丢）
+  const thinkMsx = { ...codexMsx, entries: [{ id: 't1', ts: nowIso(), role: 'assistant', kind: 'text', blocks: [{ type: 'thinking', text: '内部推理过程' }, { type: 'text', text: '结论' }], meta: {} }] };
+  const thinkR = claude.writeSession(thinkMsx, { cwd: projA });
+  const thinkText = fs.readFileSync(thinkR.path, 'utf8');
+  if (!thinkText.includes('【思考】内部推理过程') || !thinkText.includes('结论')) throw new Error('跨厂商思考块未保留');
+  fs.rmSync(thinkR.path, { force: true });
+  console.log(`  claude 跨厂商思考块: 转为【思考】文本保留 ✓`);
+
   console.log(`\n结果: 全部断言通过（无 FATAL）`);
   cleanupClaudeSandbox();
   if (out.fail.length) { console.log(out.fail.join('\n')); process.exit(1); }
