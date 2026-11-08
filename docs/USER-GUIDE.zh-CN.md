@@ -175,7 +175,7 @@ AgentRelay 就是几个 Node 内置模块加一个静态页面——服务空闲
 
 <details>
 <summary>Trae / 豆包工作支持吗？</summary>
-Trae 可作为<strong>只读源</strong>：其 agent 数据库为 SQLCipher 加密，AgentRelay 会从运行中的 Trae 进程提取运行时密钥（页 1 HMAC 校验防误报），再用 Node 自带 crypto 完成页级解密——密钥扫描期间 Trae 需处于启动状态。豆包工作的会话正文在其应用内 IndexedDB/云端，没有本地会话库。两者交接工作都走 T2 接力（逐字转写 + 启动提示词写进目标项目文件夹）。
+Trae 完整支持（T0/T1/T2）：其 agent 数据库为 SQLCipher 加密，AgentRelay 会从运行中的 Trae 进程提取运行时密钥（页 1 HMAC 校验防误报），再用 Node 自带 crypto 完成页级解密——密钥扫描期间 Trae 需处于启动状态，写入时则需完全退出 Trae（每次写入前自动备份）。豆包工作的会话正文在其应用内 IndexedDB/云端，没有本地会话库。两者交接工作都走 T2 接力（逐字转写 + 启动提示词写进目标项目文件夹）。
 </details>
 
 <details>

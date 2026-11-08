@@ -194,9 +194,14 @@ function getPlainDb(dbPath) {
       scanErr = e;
     }
     if (!encKey) {
-      // 过期快照回退（只读）
-      const prefix = `trae-dec-${path.basename(path.dirname(path.dirname(dbPath)))}-${st.size}-`;
-      const cands = fs.existsSync(cacheDir()) ? fs.readdirSync(cacheDir()).filter((f) => f.startsWith(prefix) && f.endsWith('.db')).map((f) => path.join(cacheDir(), f)) : [];
+      // 过期快照回退（只读）：前缀与 plainCachePath 同一 md5 tag（旧命名残留也兼容）
+      const tag = crypto.createHash('md5').update(dbPath).digest('hex').slice(0, 8);
+      const legacyPrefix = `trae-dec-${path.basename(path.dirname(path.dirname(dbPath)))}-${st.size}-`;
+      const cands = fs.existsSync(cacheDir())
+        ? fs.readdirSync(cacheDir())
+            .filter((f) => f.endsWith('.db') && (f.startsWith(`trae-dec-${tag}-${st.size}-`) || f.startsWith(legacyPrefix)))
+            .map((f) => path.join(cacheDir(), f))
+        : [];
       if (cands.length) {
         const newest = cands.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
         return { dbFile: newest, decrypted: true, stale: true, salt, encKey: null, saltHex };
@@ -414,6 +419,7 @@ function writeSession(msx, { cwd, baseDir } = {}) {
   if (got.stale) throw new Error('Trae 数据已有更新而本地无当前密钥——请启动 Trae（打开 AI 面板）后重试，以基于最新数据写入');
   if (fs.existsSync(encDb + '-wal')) throw new Error('检测到未合并的 WAL 日志（Trae 可能异常退出）：请启动并正常退出 Trae 以合并日志后重试，否则写入会损坏数据库');
   if (isDefaultRealDb(baseDir, encDb) && traeRunning()) throw new Error('检测到 Trae 正在运行：注入前请先完全退出 Trae（密钥已在本会话缓存，退出后直接重试即可）');
+  if (!got.decrypted) throw new Error('Trae 目标库已是明文（未加密），该写入路径未实现——请确认指向的是加密的 database.db');
   if (!encKey) throw new Error('本会话尚未提取到密钥：请先启动 Trae（打开 AI 面板）并执行一次 Dry-run 以提取密钥，然后退出 Trae 重试写入');
   const loss = [...(msx.loss || [])];
   const entries = msx.entries || [];
@@ -594,7 +600,8 @@ function safe(v) { try { return typeof v === 'string' ? JSON.parse(v) : (v ?? {}
 function doctor(baseDir) {
   const p = dbPath(baseDir);
   const exists = fs.existsSync(p);
-  // 不触发密钥扫描/解密（避免任意列表请求都做重活）：会话数只从已有解密缓存统计
+  // ok = 库文件存在即可达：卡片可见可点开，点开时才解密（首次解密需 Trae 运行中提取密钥）。
+  // 会话数只从已有解密缓存统计——绝不在 doctor 里触发密钥扫描/解密（避免任意列表请求都做重活）
   let sessions = 0;
   try {
     const st = fs.statSync(p);
@@ -606,8 +613,8 @@ function doctor(baseDir) {
     }
   } catch { }
   return {
-    agent: AGENT, ok: exists && sessions > 0, storage: p, sessionFiles: sessions,
-    note: exists ? (sessions > 0 ? null : '数据库存在；会话列表将在点开该 agent 时解密（密钥扫描需 Trae 运行中）') : '未发现 Trae 数据库（%APPDATA%\\Trae CN\\ModularData\\ai-agent\\database.db）',
+    agent: AGENT, ok: exists, storage: p, sessionFiles: sessions,
+    note: exists ? (sessions > 0 ? null : '数据库存在；点开该 agent 时解密并列出会话（首次解密需 Trae 运行中以提取密钥）') : '未发现 Trae 数据库（%APPDATA%\\Trae CN\\ModularData\\ai-agent\\database.db）',
   };
 }
 

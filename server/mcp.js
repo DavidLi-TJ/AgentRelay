@@ -165,6 +165,8 @@ async function callTool(name, args = {}) {
     }
     case 'preview_transfer':
     case 'transfer': {
+      if (!args.sourceAgent && !args.sourceInstance) return textResult({ error: '需要 sourceAgent 或 sourceInstance 参数（如 claude / zcode）' }, true);
+      if (!args.targetAgent && !args.targetInstance) return textResult({ error: '需要 targetAgent 或 targetInstance 参数' }, true);
       const confirm = args.confirm === true;
       const isDry = name === 'preview_transfer' ? true : !confirm;
       const r = await transferMod.transferOne({

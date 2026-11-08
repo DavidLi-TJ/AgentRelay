@@ -1,10 +1,10 @@
 'use strict';
 /* AgentRelay GUI v3 —— 实例化 agent · 惰性加载 · 接力向导 · 活动时间线 · 主题/双语 */
 
-const AGENT_COLORS = { claude: '#d97757', codex: '#10a37f', zcode: '#4f7cff', workbuddy: '#3c8cff', opencode: '#e8a33d', gemini: '#4796e3', pi: '#c9a227', openclaw: '#e05e3d', dsh: '#2aa8c9', vscode: '#8957e5', cursor: '#6c7ee1' };
-const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex CLI', zcode: 'ZCode', workbuddy: 'WorkBuddy', opencode: 'OpenCode', gemini: 'Gemini CLI', pi: 'Pi', openclaw: 'OpenClaw', dsh: 'DeepSeek Harness', vscode: 'VS Code Copilot', cursor: 'Cursor' };
+const AGENT_COLORS = { claude: '#d97757', codex: '#10a37f', zcode: '#4f7cff', workbuddy: '#3c8cff', opencode: '#e8a33d', gemini: '#4796e3', pi: '#c9a227', openclaw: '#e05e3d', dsh: '#2aa8c9', vscode: '#8957e5', cursor: '#6c7ee1', hermes: '#9b7cff', trae: '#2b6cb0', doubao: '#3b6dfd' };
+const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex CLI', zcode: 'ZCode', workbuddy: 'WorkBuddy', opencode: 'OpenCode', gemini: 'Gemini CLI', pi: 'Pi', openclaw: 'OpenClaw', dsh: 'DeepSeek Harness', vscode: 'VS Code Copilot', cursor: 'Cursor', hermes: 'Hermes Agent', trae: 'Trae', doubao: '豆包工作' };
 // 原生接力能力兜底表（与服务端 agents.js META.cap 同步；/api/agents 实例会带实时 cap，优先用那个）
-const AGENT_CAPS = { claude: { t0: 1, t1: 1 }, codex: { t0: 1, t1: 1 }, zcode: { t0: 1, t1: 1 }, workbuddy: { t0: 1, t1: 1 }, opencode: { t0: 1, t1: 1 }, gemini: { t0: 1, t1: 1 }, pi: { t0: 1, t1: 1 }, openclaw: { t0: 1, t1: 1 }, dsh: { t0: 1, t1: 1 }, vscode: { t0: 1, t1: 1 }, cursor: { t0: 0, t1: 1 } };
+const AGENT_CAPS = { claude: { t0: 1, t1: 1 }, codex: { t0: 1, t1: 1 }, zcode: { t0: 1, t1: 1 }, workbuddy: { t0: 1, t1: 1 }, opencode: { t0: 1, t1: 1 }, gemini: { t0: 1, t1: 1 }, pi: { t0: 1, t1: 1 }, openclaw: { t0: 1, t1: 1 }, dsh: { t0: 1, t1: 1 }, vscode: { t0: 1, t1: 1 }, cursor: { t0: 0, t1: 1 }, hermes: { t0: 1, t1: 1 }, trae: { t0: 1, t1: 1 }, doubao: { t0: 0, t1: 0 } };
 
 const state = {
   instances: [],

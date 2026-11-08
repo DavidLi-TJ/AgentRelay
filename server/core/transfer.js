@@ -117,7 +117,8 @@ function writeMsxFile(msx, file) {
     let first = true;
     for (const k of Object.keys(msx)) {
       if (k === 'entries' || k === 'compactions' || k === 'loss') continue;
-      if (k.startsWith('_') || msx[k] === undefined) continue; // 内部字段（_fileStat/_storeSig 等）与 undefined 不入导出
+      if (k.startsWith('_') && k !== '_passthrough') continue; // 内部字段不入导出，但 _passthrough（claude 保真行）必须随行，否则 cli load 丢 sidechain
+      if (msx[k] === undefined) continue;
       if (!first) ws.write(',');
       first = false;
       ws.write(JSON.stringify(k) + ':' + JSON.stringify(msx[k]));

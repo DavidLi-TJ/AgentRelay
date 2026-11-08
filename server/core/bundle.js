@@ -39,6 +39,7 @@ async function exportBundle({ items, options = {}, redact = false, out = null })
         arx: 1, id: src.id, created_at: src.created_at, source: src.source,
         project: { cwd: src.project?.cwd || null }, env: src.env,
         stats: computeStats(entries), entries, compactions: src.compactions || [], loss,
+        _passthrough: src._passthrough || [],
       };
       if (redact) msx = redactMsx(msx);
       if (n) ws.write(',');
@@ -255,7 +256,9 @@ async function importBundle({ file, remap, targets, options = {}, dryRun = false
         });
         if (coerced && r.ok) {
           r.notes = r.notes || [];
-          r.notes.push('bundle 导入不走 T0 文件级复制（源文件不在本机），已按 T1 原生注入等价执行：同一写入器，内容逐字经 ARX');
+          r.notes.push(mode === 'T2'
+            ? '该目标不支持 T1 原生注入，已降级为 T2 逐字转写（转写文件 + 启动指令写入项目目录）'
+            : 'bundle 导入不走 T0 文件级复制（源文件不在本机），已按 T1 原生注入等价执行：同一写入器，内容逐字经 ARX');
         }
         results.push(r);
       }

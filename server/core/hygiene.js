@@ -64,6 +64,15 @@ function pruneTraeCache() {
     for (const x of files.slice(2)) {
       try { fs.rmSync(x.p, { force: true }); } catch { }
     }
+    // 孤儿 -wal/-shm 一并清理：对应主库已不存在（或已删）的边车文件
+    const alive = new Set(files.slice(0, 2).map((x) => x.p));
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.startsWith('trae-dec-') || (!f.endsWith('.db-wal') && !f.endsWith('.db-shm'))) continue;
+      const main = path.join(dir, f.slice(0, -4));
+      if (!alive.has(main) && !fs.existsSync(main)) {
+        try { fs.rmSync(path.join(dir, f), { force: true }); } catch { }
+      }
+    }
   } catch { }
 }
 
