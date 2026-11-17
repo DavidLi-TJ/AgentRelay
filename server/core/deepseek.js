@@ -91,10 +91,13 @@ function fragToBlocks(m, loss) {
         break;
       }
       case 'TOOL_OPEN': {
-        let s = '';
-        if (fr.result && typeof fr.result === 'object') s = (fr.result.title || '') + (fr.result.url ? `（${fr.result.url}）` : '');
-        else { try { const j = JSON.parse(c); s = (j.title || '') + (j.url ? `（${j.url}）` : ''); } catch { s = String(c || '').slice(0, 200); } }
+        // result.snippet 是模型实际读到的页面摘要——接力保真的关键内容，截断保留
+        let title = '', url = '', snippet = '';
+        if (fr.result && typeof fr.result === 'object') { title = fr.result.title || ''; url = fr.result.url || ''; snippet = String(fr.result.snippet || '').slice(0, 300); }
+        else { try { const j = JSON.parse(c); title = j.title || ''; url = j.url || ''; snippet = String(j.snippet || '').slice(0, 300); } catch { snippet = String(c || '').slice(0, 300); } }
+        let s = title + (url ? `（${url}）` : '');
         if (s) blocks.push({ type: 'text', text: `〔浏览网页〕${s}` });
+        if (snippet) blocks.push({ type: 'text', text: `〔网页摘要〕${snippet}` });
         break;
       }
       case 'FILE': {
