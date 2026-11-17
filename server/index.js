@@ -463,6 +463,22 @@ async function route(req, res, u) {
         return send(res, 500, { error: e.message });
       }
     }
+    if (p === '/api/deepseek/import') {
+      const body = await readBody(req, res);
+      try {
+        const ds = require('./core/deepseek');
+        let result;
+        if (body.url) result = await ds.importShare(String(body.url));
+        else if (body.zipPath) result = ds.importZip(path.resolve(String(body.zipPath)));
+        else return send(res, 400, { error: 'zipPath 或 url 必填' });
+        agents.bustListCache();
+        logger.info('deepseek-import', { imported: result.imported || 1, title: result.title || '' });
+        return send(res, 200, { ok: true, ...result });
+      } catch (e) {
+        logger.warn('deepseek-import-failed', { error: e.message });
+        return send(res, 400, { error: e.message });
+      }
+    }
     if (p === '/api/preview' || p === '/api/transfer') {
       const body = await readBody(req, res);
       try {

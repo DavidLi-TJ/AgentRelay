@@ -1789,6 +1789,28 @@ function bindSettings() {
   }
   $('#bundle-import-run').addEventListener('click', () => runBundleImport(false));
   $('#bundle-import-dry').addEventListener('click', () => runBundleImport(true));
+  // DeepSeek 导入（官方导出 zip / 分享链接）→ 存为本机只读源，之后正常接力
+  $('#ds-import-btn').addEventListener('click', async () => {
+    const zipPath = $('#ds-zip-path').value.trim();
+    const url = $('#ds-share-url').value.trim();
+    if (!zipPath && !url) { toast(t('请填写 zip 路径或分享链接'), 'warn'); return; }
+    const btn = $('#ds-import-btn');
+    btn.disabled = true;
+    $('#ds-import-note').textContent = t('解析中…');
+    try {
+      const r = await api('/api/deepseek/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(zipPath ? { zipPath } : { url }),
+      });
+      const n = r.imported || 1;
+      $('#ds-import-note').textContent = '';
+      toast(`${t('DeepSeek 导入成功')}：${n} ${t('个会话')} — ${t('已出现在会话页的 DeepSeek 卡片')}`);
+      await loadAgents(true);
+    } catch (e) {
+      $('#ds-import-note').textContent = '';
+      toast(t('DeepSeek 导入失败: ') + e.message, 'err');
+    } finally { btn.disabled = false; }
+  });
   $('#btn-clear-bg').addEventListener('click', () => { $('#set-bgimage').value = ''; applyBgImage(''); });
   // 背景图输入即时预览（防抖），无需先点保存
   let bgTimer = null;

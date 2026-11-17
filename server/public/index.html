@@ -81,6 +81,17 @@
             <input id="relay-src-search" class="input" type="text" data-i18n-ph="筛选会话" placeholder="筛选会话">
           </div>
           <div id="relay-src-list" class="relay-src-list"></div>
+          <details class="ds-import">
+            <summary data-i18n="DeepSeek 对话导入（官方导出 zip / 分享链接）">DeepSeek 对话导入（官方导出 zip / 分享链接）</summary>
+            <div class="ds-import-form">
+              <label class="muted" data-i18n="官方数据导出 zip 路径">官方数据导出 zip 路径</label>
+              <input id="ds-zip-path" class="input" type="text" data-i18n-ph="C:\\Users\\…\\deepseek_data-2026-11-17.zip" placeholder="C:\Users\…\deepseek_data-2026-11-17.zip">
+              <label class="muted" data-i18n="或 分享链接">或 分享链接</label>
+              <input id="ds-share-url" class="input" type="text" data-i18n-ph="https://chat.deepseek.com/share/…" placeholder="https://chat.deepseek.com/share/…">
+              <button class="btn small" id="ds-import-btn" data-i18n="解析并导入">解析并导入</button>
+              <div id="ds-import-note" class="muted"></div>
+            </div>
+          </details>
         </section>
         <section class="relay-step" id="relay-step2">
           <h3><span class="stepnum">2</span><span data-i18n="目标">目标</span></h3>

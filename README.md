@@ -18,6 +18,17 @@ English ｜ [简体中文](README.zh-CN.md) · [User guide](docs/USER-GUIDE.md) 
 npx @ldavidl/agentrelay serve   # zero install, zero dependencies
 ```
 
+## Import DeepSeek conversations (NEW)
+
+DeepSeek's server has been buckling under load, and old conversations there can become unrecoverable. AgentRelay now rescues them: bring a conversation into any of the 13 local agents through either door —
+
+- **The official data-export zip** (Settings → data export on chat.deepseek.com produces `deepseek_data-<date>.zip`). Point AgentRelay at the file; all conversations are parsed (thinking blocks, web searches, opened pages, attachments included) and listed as a regular source.
+- **A share link** (`https://chat.deepseek.com/share/<id>`) — paste it, AgentRelay fetches the full conversation through DeepSeek's own share API.
+
+Imported chats appear on the Sessions page under a **DeepSeek** card; check entries, pick a target agent, and relay them anywhere — same verbatim pipeline, same fidelity manifest. Nothing is uploaded: the zip is parsed locally, and the share link is a single user-initiated read of DeepSeek's own public API.
+
+Details in the [user guide](docs/USER-GUIDE.md).
+
 ## The problem
 
 You spend three hours in Claude Code. The task is half done and the agent finally knows every quirk of the codebase. Then you hit a usage cap, or you just want Codex to take over. What happens to the session? A copy-pasted summary loses the tool calls, the error output, and the exact state of the work. Starting over throws away the whole afternoon.

@@ -56,3 +56,8 @@ clips/
 scripts/cleanup-*.js
 scripts/restore_*.js
 scripts/debug_*.js
+
+# ── DeepSeek 个人数据导出（含私人对话，绝不入库）──────────
+deepseek_data-*.zip
+deepseek_data*/
+ds-share-*.html

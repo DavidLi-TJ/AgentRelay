@@ -358,6 +358,13 @@ body {
 .chip.active { color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--accent-soft); }
 .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
 .relay-src-list { margin-top: 8px; max-height: 340px; overflow-y: auto; }
+.ds-import { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.ds-import summary { cursor: pointer; color: var(--muted); font-size: 12px; user-select: none; }
+.ds-import summary:hover { color: var(--text); }
+.ds-import-form { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
+.ds-import-form label { font-size: 11px; }
+.ds-import-form .btn { align-self: flex-start; }
+#ds-import-note { word-break: break-all; }
 .relay-src-list .sess-item { animation: none; }
 .tgt-grid { display: flex; flex-direction: column; gap: 8px; }
 .tgt-card {

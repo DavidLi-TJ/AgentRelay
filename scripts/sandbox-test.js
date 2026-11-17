@@ -243,7 +243,7 @@ const nowIso = () => new Date().toISOString();
   if (!hmList.some((s) => s.id === rHm.id)) throw new Error('hermes 列表未发现注入会话');
   const hmBack = await hermes.readSession(rHm.id, hmHome);
   if (hmBack.stats.userTurns === 0 || hmBack.stats.toolCalls === 0) throw new Error('hermes 回读缺内容');
-  if (!hmBack.entries.some((e) => (e.blocks || []).some((b) => b.type === 'thinking'))) throw new Error('hermes reasoning_content 未回读为思考块');
+  if ((codexMsx.stats.thinking || 0) > 0 && !hmBack.entries.some((e) => (e.blocks || []).some((b) => b.type === 'thinking'))) throw new Error('hermes reasoning_content 未回读为思考块');
   const hmT0 = hermes.copySession(rHm.id, { baseDir: hmHome });
   const hmDbChk = new (require('node:sqlite').DatabaseSync)(path.join(hmHome, 'state.db'));
   const hmSrcMsgs = hmDbChk.prepare('SELECT count(*) c FROM messages WHERE session_id = ?').get(rHm.id).c;
@@ -294,6 +294,77 @@ const nowIso = () => new Date().toISOString();
     }
     console.log(`  trae 加解密往返: ${pages} 页 × 4016 可用字节 逐字节一致 ✓`);
   }
+
+  // deepseek 导入（合成官方导出格式的 zip：stored 条目 + 中央目录；导入 → 读回 → 接力到 claude）
+  const ds = require('../server/core/deepseek');
+  const dsHome = path.join(SANDBOX, 'deepseek-home');
+  fs.mkdirSync(dsHome, { recursive: true });
+  {
+    // 零依赖 stored-zip 写入器（测试夹具专用；真实 zip 为 deflate，读侧两者都支持）
+    const enc = (name, data) => {
+      const nameBuf = Buffer.from(name, 'utf8');
+      const crc = (() => { let c = ~0; for (const b of data) { c ^= b; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1)); } return ~c >>> 0; })();
+      const lh = Buffer.alloc(30);
+      lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0, 6);
+      lh.writeUInt16LE(0, 8); lh.writeUInt16LE(0, 10); lh.writeUInt32LE(crc, 14);
+      lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(data.length, 22);
+      lh.writeUInt16LE(nameBuf.length, 26);
+      const cd = Buffer.alloc(46);
+      cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(0, 6);
+      cd.writeUInt16LE(0, 8); cd.writeUInt16LE(0, 10); cd.writeUInt32LE(crc, 16);
+      cd.writeUInt32LE(data.length, 20); cd.writeUInt32LE(data.length, 24);
+      cd.writeUInt16LE(nameBuf.length, 28); cd.writeUInt32LE(lh.length, 42);
+      return { local: Buffer.concat([lh, nameBuf, data]), cd, nameBuf };
+    };
+    const mk = (name, obj) => enc(name, Buffer.from(JSON.stringify(obj), 'utf8'));
+    const conv = (sid, title, turns) => mk(`chat_sessions/${sid}.json`, {
+      id: sid, title, pinned: false, current_message_id: turns.length,
+      inserted_at: '2026-01-01T10:00:00Z', updated_at: '2026-01-01T11:00:00Z',
+      messages: turns.map((t, i) => ({ id: i + 1, parent_id: i || null, role: t.role.toUpperCase(), status: 'FINISHED', inserted_at: `2026-01-01T1${i}:00:00Z`, fragments: t.frags })),
+    });
+    const parts = [
+      enc('manifest.json', Buffer.from('{"export_format_version":3}')),
+      enc('user.json', Buffer.from('{"user_id":"fixture"}')),
+      conv('ds-fix-1', 'DS 夹具会话', [
+        { role: 'user', frags: [{ type: 'REQUEST', content: 'DeepSeek 夹具暗号蓝鲸88' }] },
+        { role: 'assistant', frags: [
+          { type: 'THINK', content: '夹具思考' },
+          { type: 'TOOL_SEARCH', content: JSON.stringify({ queries: ['夹具查询'] }) },
+          { type: 'RESPONSE', content: '夹具回答' },
+        ] },
+      ]),
+    ];
+    const locals = [], cds = [];
+    let offset = 0;
+    for (const p of parts) {
+      p.cd.writeUInt32LE(offset, 42); // 本地头偏移逐条累计
+      locals.push(p.local);
+      cds.push(Buffer.concat([p.cd, p.nameBuf])); // CD 条目 = 46 字节定长 + 文件名
+      offset += p.local.length;
+    }
+    const cdStart = offset;
+    const cdBuf = Buffer.concat(cds);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(parts.length, 8); eocd.writeUInt16LE(parts.length, 10);
+    eocd.writeUInt32LE(cdBuf.length, 12); eocd.writeUInt32LE(cdStart, 16);
+    fs.writeFileSync(path.join(dsHome, 'deepseek-fixture.zip'), Buffer.concat([...locals, cdBuf, eocd]));
+  }
+  const dsImport = ds.importZip(path.join(dsHome, 'deepseek-fixture.zip'));
+  if (dsImport.imported !== 1) throw new Error('deepseek 导入数不符: ' + dsImport.imported);
+  const dsList = ds.listSessions();
+  const dsSess = dsList.find((s) => s.title.includes('DS 夹具会话'));
+  if (!dsSess) throw new Error('deepseek 列表未见夹具会话');
+  const dsMsx = await ds.readSession(dsSess.id);
+  if (dsMsx.stats.entries !== 2 || dsMsx.stats.thinking !== 1) throw new Error('deepseek 读回内容不符');
+  if (!dsMsx.entries.some((e) => e.blocks.some((b) => b.text && b.text.includes('〔联网搜索〕')))) throw new Error('deepseek 搜索标记缺失');
+  // deepseek 源 → claude 目标（T1，走 transferOne 真实管线）
+  const dsRelay = await require('../server/core/transfer').transferOne({
+    sourceAgent: 'deepseek', sessionId: dsSess.id, targetAgent: 'claude', cwd: projA, mode: 'T1',
+  });
+  if (!dsRelay.ok || !fs.existsSync(dsRelay.path)) throw new Error('deepseek → claude 接力失败');
+  const dsRelayBack = claude.readSession(dsRelay.id);
+  if (!dsRelayBack.entries.some((e) => e.blocks.some((b) => b.text && b.text.includes('蓝鲸88')))) throw new Error('deepseek 接力丢内容');
+  console.log(`  deepseek 导入: ${dsImport.imported} 会话 接力→claude 回读=${dsRelayBack.stats.entries}条 ✓`);
 
   // T0 原生复制（gemini/pi/openclaw/dsh 沙盒内 + 源不可变断言）
   const dshSrcBefore = fs.statSync(rDsh.path).mtimeMs;

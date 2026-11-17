@@ -14,6 +14,17 @@
 
 </div>
 
+## 从 DeepSeek 导入对话（NEW）
+
+DeepSeek 服务器近期承压，历史对话可能无法继续访问。AgentRelay 现在可以把它们救出来——两条入口，落到 13 个本地 agent 的任意一个：
+
+- **官方数据导出 zip**（chat.deepseek.com 设置里申请的数据导出 `deepseek_data-<日期>.zip`）。把文件路径告诉 AgentRelay，全部会话被解析（含思考块、联网搜索、浏览网页、附件）并列成常规源。
+- **分享链接**（`https://chat.deepseek.com/share/<id>`）——粘贴链接，AgentRelay 通过 DeepSeek 自己的分享 API 拉取完整对话。
+
+导入的会话出现在会话页的 **DeepSeek** 卡片下：勾选条目、选目标 agent、正常接力——同一条逐字管线、同一份保真清单。全程不上传：zip 本地解析，分享链接是用户主动发起的一次对 DeepSeek 公开 API 的读取。
+
+详见[用户指南](docs/USER-GUIDE.zh-CN.md)。
+
 ## 这解决什么问题
 
 你在 Claude Code 里干了三个小时，任务做到一半，agent 终于摸清了代码库的每个坑。这时候用量到顶了，或者你就是想让 Codex 接手。会话怎么办？复制粘贴一份摘要，工具调用、报错输出、工作现场全丢了；从头再来，一下午白费。

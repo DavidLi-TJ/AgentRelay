@@ -20,6 +20,7 @@ const cursor = require('./cursor');
 const doubao = require('./doubao');
 const hermes = require('./hermes');
 const trae = require('./trae');
+const deepseek = require('./deepseek');
 const { lastCompactionIndex } = require('./msx');
 
 // cap = 原生接力能力（单一事实来源；transfer/GUI/CLI/MCP 均读这里，勿再散落硬编码清单）
@@ -39,8 +40,9 @@ const META = {
   doubao: { id: 'doubao', name: '豆包工作', vendor: 'ByteDance 字节跳动', color: '#3b6dfd', cli: null, experimental: true, cap: { t0: 0, t1: 0 }, note: '会话存于应用内 IndexedDB/云端，无本地原生存储；仅支持 T2 逐字转写写入其项目目录' },
   hermes: { id: 'hermes', name: 'Hermes Agent', vendor: 'Nous Research', color: '#9b7cff', cli: 'hermes', hideIfMissing: true, cap: { t0: 1, t1: 1 } },
   trae: { id: 'trae', name: 'Trae', vendor: 'ByteDance 字节跳动', color: '#2b6cb0', cli: null, hideIfMissing: true, cap: { t0: 1, t1: 1 }, note: 'SQLCipher 解密：读取时 Trae 需启动（密钥在进程内存）；注入/复制时 Trae 需完全退出（写前自动备份）' },
+  deepseek: { id: 'deepseek', name: 'DeepSeek（导入）', vendor: 'DeepSeek', color: '#4d6bfe', cli: null, hideIfMissing: true, cap: { t0: 0, t1: 0 }, note: '官方导出 zip / 分享链接导入的对话快照，可作为接力源；DeepSeek 是云端产品，不能作为接力目标' },
 };
-const ADAPTERS = { claude, codex, zcode, workbuddy, opencode, gemini, pi, openclaw, dsh, vscode, cursor, doubao, hermes, trae };
+const ADAPTERS = { claude, codex, zcode, workbuddy, opencode, gemini, pi, openclaw, dsh, vscode, cursor, doubao, hermes, trae, deepseek };
 
 // DSH 的 T0/T1 依赖 Node ≥23.8 的内置 zstd（写入要压缩、读取要解压）；低版本直接降级到 T2，
 // 避免 GUI 按静态 cap 推荐 T1 后才在写入时报错（审核 P2）
@@ -283,6 +285,7 @@ function addCustomInstance({ type, name, dataDir }) {
       doubao: 'User Data 目录（豆包桌面端，仅 T2 目标）',
       hermes: 'state.db（Hermes Agent 数据目录，如 %LOCALAPPDATA%\\hermes 或 HERMES_HOME）',
       trae: 'database.db（Trae 数据目录 ModularData/ai-agent）',
+      deepseek: '导入目录（通过接力页的 DeepSeek 导入入口创建）',
       cursor: 'User/globalStorage/state.vscdb（Cursor 数据目录的上级）',
     }[type] || '存储目录';
     throw new Error(`在 ${abs} 下未找到 ${type} 的存储（应有 ${expect}）`);
