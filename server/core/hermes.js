@@ -241,14 +241,14 @@ function writeSession(msx, { cwd, baseDir } = {}) {
           continue;
         }
         if (e.kind === 'tool-result') {
-          const b = (e.blocks || []).find((x) => x.type === 'tool_result');
-          if (!b) continue;
-          const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
-          prepared.push({
-            role: 'tool', tool_call_id: b.for || 'call', tool_name: callNames.get(b.for) || 'tool',
-            content: JSON.stringify({ output: outText, exit_code: b.isError ? 1 : 0, error: null }),
-            timestamp: ts, finish_reason: 'stop',
-          });
+          for (const b of (e.blocks || []).filter((x) => x.type === 'tool_result')) {
+            const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+            prepared.push({
+              role: 'tool', tool_call_id: b.for || 'call', tool_name: callNames.get(b.for) || 'tool',
+              content: JSON.stringify({ output: outText, exit_code: b.isError ? 1 : 0, error: null }),
+              timestamp: ts, finish_reason: 'stop',
+            });
+          }
           continue;
         }
         if (e.role !== 'assistant') continue;

@@ -197,6 +197,22 @@ async function transferOne({ sourceAgent, sessionId, targetAgent, cwd, mode = 'T
       stats: computeStats(entries), entries, compactions: src.compactions || [], loss,
       _passthrough: src._passthrough || [],
     };
+    // 跨厂商目标（非 claude 写入器不消费 passthrough）：把有正文的保真行转为普通条目，
+    // 纯元数据行记入 loss——不让 sidechain/排队消息静默蒸发（审计 S3）
+    if (targetAgent !== 'claude' && Array.isArray(src._passthrough) && src._passthrough.length) {
+      let contentLines = 0, metaLines = 0;
+      for (const p of src._passthrough) {
+        const line = p.line || {};
+        const text = String(line.content || (line.message && (typeof line.message.content === 'string' ? line.message.content : (Array.isArray(line.message.content) ? line.message.content.map((b) => b.text || '').filter(Boolean).join('\n') : ''))) || '').trim();
+        if (text && !text.startsWith('<')) {
+          entries.push({ id: 'pt' + entries.length, ts: line.timestamp || null, role: line.role === 'assistant' ? 'assistant' : 'user', kind: 'text', blocks: [{ type: 'text', text: `〔claude 附加行〕${text.slice(0, 500)}` }], meta: {} });
+          contentLines++;
+        } else metaLines++;
+      }
+      if (contentLines) loss.push(`${contentLines} 条 claude 附加行（子代理/排队消息）已转为普通条目（跨厂商目标无原生 passthrough 通道）`);
+      if (metaLines) loss.push(`${metaLines} 条元数据行（快照/模式等）跨厂商目标不支持，已省略`);
+      msx.stats = computeStats(entries);
+    }
     if (options.redact) msx = redactMsx(msx);
     result.stats = msx.stats;
     result.title = msx.source.title;

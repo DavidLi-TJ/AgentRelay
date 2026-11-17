@@ -330,11 +330,11 @@ function insertSession(db, { sessionId, cwd, title, entries, sourceAgent }) {
   for (const e of entries || []) {
     // 工具结果按真实 Trae 形态落盘：独立 role='tool' 行 + <toolcall_status/result> 包装（读侧可解析回来，写读闭环）
     if (e.kind === 'tool-result') {
-      const b = (e.blocks || []).find((x) => x.type === 'tool_result');
-      if (!b) continue;
-      const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
-      const wrapper = (b.isError ? '<toolcall_status>error</toolcall_status>' : '<toolcall_status>done</toolcall_status>') + '<toolcall_result>' + outText + '</toolcall_result>';
-      raws.push({ role: 'tool', content: [{ type: 'text', text: wrapper }], tool_call_id: b.for || 'call' });
+      for (const b of (e.blocks || []).filter((x) => x.type === 'tool_result')) {
+        const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+        const wrapper = (b.isError ? '<toolcall_status>error</toolcall_status>' : '<toolcall_status>done</toolcall_status>') + '<toolcall_result>' + outText + '</toolcall_result>';
+        raws.push({ role: 'tool', content: [{ type: 'text', text: wrapper }], tool_call_id: b.for || 'call' });
+      }
       continue;
     }
     const blocks = [];

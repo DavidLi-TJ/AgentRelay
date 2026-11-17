@@ -226,7 +226,7 @@ function readSession(sessionIdOrFile, baseDir) {
     const next = mainList.find((m) => m.idx > idx);
     return { after: next ? next.uuid : '__END__', line };
   });
-  if (sidechainCount) loss.push(`${sidechainCount} 条 sidechain（子代理）行将原样保留（保存时随行写回）`);
+  if (sidechainCount) loss.push(`${sidechainCount} 条 sidechain（子代理）行已收集（claude 目标原样写回；跨厂商目标转为普通条目）`);
   const stats = {
     entries: entries.length,
     userTurns: entries.filter((e) => e.role === 'user' && e.kind === 'text').length,

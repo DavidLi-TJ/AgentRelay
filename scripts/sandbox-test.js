@@ -112,7 +112,7 @@ const nowIso = () => new Date().toISOString();
   console.log(`  codex→workbuddy(副本): lines=${r4.count} 回读entries=${back4.stats.entries} user=${back4.stats.userTurns}`);
 
   // workbuddy T0 同源复制（db 副本 + 沙盒 projectsDir；新 id 文件 + sessions 行克隆 + sessionId 字段重写）
-  const wbT0 = workbuddy.copySession(r4.id, { dbFile: wcopy, projectsDir: path.join(SANDBOX, 'wb-projects') });
+  const wbT0 = await workbuddy.copySession(r4.id, { dbFile: wcopy, projectsDir: path.join(SANDBOX, 'wb-projects') });
   const wbT0Lines = JSON.parse(require('fs').readFileSync(wbT0.path, 'utf8').trim().split('\n')[0]);
   const wbT0Db = new (require('node:sqlite').DatabaseSync)(wcopy);
   const wbT0Rows = wbT0Db.prepare('SELECT count(*) c FROM sessions WHERE id = ?').get(wbT0.id).c;

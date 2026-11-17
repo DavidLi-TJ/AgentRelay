@@ -168,10 +168,10 @@ function openclawRecordsFrom(entries, loss) {
       continue;
     }
     if (e.kind === 'tool-result') {
-      const b = (e.blocks || []).find((x) => x.type === 'tool_result');
-      if (!b) continue;
-      const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
-      pushMsg(rid, ts, { role: 'toolResult', toolCallId: b.for || 'call', content: [{ type: 'text', text: outText }], isError: !!b.isError });
+      for (const b of (e.blocks || []).filter((x) => x.type === 'tool_result')) {
+        const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+        pushMsg(rid, ts, { role: 'toolResult', toolCallId: b.for || 'call', content: [{ type: 'text', text: outText }], isError: !!b.isError });
+      }
       continue;
     }
     if (e.role !== 'assistant') continue;

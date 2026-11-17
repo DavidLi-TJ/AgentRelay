@@ -185,10 +185,11 @@ function piEntriesFrom(entries, loss) {
       continue;
     }
     if (e.kind === 'tool-result') {
-      const b = (e.blocks || []).find((x) => x.type === 'tool_result');
-      if (!b) continue;
-      const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
-      push({ role: 'toolResult', toolCallId: b.for || 'call', content: [{ type: 'text', text: outText }], isError: !!b.isError, output: outText });
+      // 多结果块逐块发（并行工具调用不丢第 2..N 个结果，审计 S2）
+      for (const b of (e.blocks || []).filter((x) => x.type === 'tool_result')) {
+        const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+        push({ role: 'toolResult', toolCallId: b.for || 'call', content: [{ type: 'text', text: outText }], isError: !!b.isError, output: outText });
+      }
       continue;
     }
     if (e.role !== 'assistant') continue;

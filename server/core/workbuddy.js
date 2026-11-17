@@ -133,27 +133,26 @@ async function readSession(sessionId, baseDir) {
 }
 
 // ---------- T0 同源复制：新会话 id + 克隆 sessions 行 + 重写 jsonl 的 sessionId 字段（cwd/时间原样） ----------
-function copySession(sessionId, { baseDir, dbFile, projectsDir } = {}) {
+async function copySession(sessionId, { baseDir, dbFile, projectsDir } = {}) {
   const srcFile = fs.existsSync(sessionId) ? sessionId : findSessionFile(sessionId, baseDir, projectsDir);
   if (!srcFile) throw new Error(`WorkBuddy T0：源会话文件不存在: ${sessionId}`);
   const id = randomUUID();
   const dir = projectsDir || path.dirname(srcFile);
   ensureDir(dir);
   const file = path.join(dir, id + '.jsonl');
-  // 逐行重写 sessionId；行内 id/parentId 链原样保留（引用一致性不变），无法解析的行原样照抄（逐字原则）
-  const raw = fs.readFileSync(srcFile, 'utf8');
-  const out = [];
+  // 流式逐行重写 sessionId（数百 MB 大会话防 ERR_STRING_TOO_LONG，审计 S5）；
+  // 行内 id/parentId 链原样保留（引用一致性不变），无法解析的行原样照抄（逐字原则）
+  const rl = require('readline').createInterface({ input: fs.createReadStream(srcFile, { encoding: 'utf8', highWaterMark: 1024 * 1024 }), crlfDelay: Infinity });
+  const outFd = fs.openSync(file, 'w');
   let count = 0;
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
+  rl.on('line', (line) => {
+    if (!line.trim()) return;
     count++;
-    try {
-      const o = JSON.parse(line);
-      if (o.sessionId !== undefined) o.sessionId = id;
-      out.push(JSON.stringify(o));
-    } catch { out.push(line); }
-  }
-  fs.writeFileSync(file, out.join('\n') + '\n');
+    try { const o = JSON.parse(line); if (o.sessionId !== undefined) o.sessionId = id; fs.writeSync(outFd, JSON.stringify(o) + '\n'); }
+    catch { fs.writeSync(outFd, line + '\n'); }
+  });
+  await new Promise((resolve, reject) => { rl.on('close', resolve); rl.on('error', reject); });
+  fs.closeSync(outFd);
   // 克隆 sessions 行（时间原样）+ session_usage；DB 失败补偿删除已落盘 jsonl
   const targetDb = dbFile || dbPath(baseDir);
   let db;

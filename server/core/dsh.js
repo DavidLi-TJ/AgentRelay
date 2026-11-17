@@ -141,6 +141,13 @@ async function readSession(sessionId, baseDir) {
       entries.push({ id: 'r' + ev.seq, ts, role: 'user', kind: 'tool-result', blocks: [{ type: 'tool_result', for: (m.source && m.source.callId) || (m.toolCallId || 'call'), output: nestedText(m.content), isError: !!m.isError }], meta: {} });
     } else if (ev.type === 'compaction/summary') {
       compactions.push({ ts, message: nestedText(d.summary) });
+    } else if (ev.type === 'agent/inbox/spliced' || ev.type === 'system/message' || ev.type === 'goal/change' || ev.type === 'todo/write') {
+      // 内容型事件（注入指令/系统说明/目标/任务清单正文）——转 meta 条目而非静默跳过（审计 S4）
+      const text = typeof d.content === 'string' ? d.content : (d.text || (d.items ? JSON.stringify(d.items).slice(0, 400) : nestedText(d.content ?? d)) || '');
+      const shown = nestedText(text) || JSON.stringify(d).slice(0, 300);
+      if (shown.trim()) entries.push({ id: 'c' + ev.seq, ts, role: 'meta', kind: 'note', blocks: [{ type: 'text', text: `〔${ev.type}〕${shown.slice(0, 400)}` }], meta: {} });
+    } else if (ev.type === 'command/run' || ev.type === 'command/done' || ev.type === 'subagent/descriptor') {
+      loss.push(`DeepSeek Harness: 跳过 ${ev.type} 事件 1 条`);
     }
     // assistant/chunk、reasoning-chunks、tool-call-chunks、text-chunks、turn/*、step/*、llm/* 等流式/边界事件跳过
   }
@@ -199,13 +206,13 @@ function dshEventsFrom(entries, loss) {
       continue;
     }
     if (e.kind === 'tool-result') {
-      const b = (e.blocks || []).find((x) => x.type === 'tool_result');
-      if (!b) continue;
-      const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
-      events.push({
-        seq: seq++, time: at(e.ts), type: 'tool/result',
-        data: { message: { source: { callId: b.for || 'call' }, toolCallId: b.for || 'call', content: [{ type: 'tool-result', toolCallId: b.for || 'call', content: [{ type: 'text', text: outText }] }], isError: !!b.isError } },
-      });
+      for (const b of (e.blocks || []).filter((x) => x.type === 'tool_result')) {
+        const outText = typeof b.output === 'string' ? b.output : JSON.stringify(b.output ?? '');
+        events.push({
+          seq: seq++, time: at(e.ts), type: 'tool/result',
+          data: { message: { source: { callId: b.for || 'call' }, toolCallId: b.for || 'call', content: [{ type: 'tool-result', toolCallId: b.for || 'call', content: [{ type: 'text', text: outText }] }], isError: !!b.isError } },
+        });
+      }
       continue;
     }
     if (e.role !== 'assistant') continue;

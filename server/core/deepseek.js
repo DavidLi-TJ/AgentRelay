@@ -83,21 +83,23 @@ function fragToBlocks(m, loss) {
         if (c) blocks.push({ type: 'thinking', text: String(c) });
         break;
       case 'TOOL_SEARCH': {
-        // 分享 API 的 queries 在 fragment 顶层；导出 zip 的 queries 在 content JSON 里
-        let q = '';
+        // 分享 API 的 queries 在 fragment 顶层；导出 zip 的 queries 在 content JSON 里；results 附标题行
+        let q = '', results = fr.results || [];
         if (Array.isArray(fr.queries)) q = fr.queries.map((x) => x.query || x).join('；');
-        else { try { const j = JSON.parse(c); q = (j.queries || []).map((x) => x.query || x).join('；'); } catch { q = String(c || '').slice(0, 200); } }
+        else { try { const j = JSON.parse(c); q = (j.queries || []).map((x) => x.query || x).join('；'); if (!results.length) results = j.results || []; } catch { q = String(c || '').slice(0, 200); } }
         if (q) blocks.push({ type: 'text', text: `〔联网搜索〕${q}` });
+        const titles = results.map((x) => x.title || x.url || '').filter(Boolean).slice(0, 5);
+        if (titles.length) blocks.push({ type: 'text', text: `〔搜索命中〕${titles.join('；')}` });
         break;
       }
       case 'TOOL_OPEN': {
-        // result.snippet 是模型实际读到的页面摘要——接力保真的关键内容，截断保留
-        let title = '', url = '', snippet = '';
-        if (fr.result && typeof fr.result === 'object') { title = fr.result.title || ''; url = fr.result.url || ''; snippet = String(fr.result.snippet || '').slice(0, 300); }
-        else { try { const j = JSON.parse(c); title = j.title || ''; url = j.url || ''; snippet = String(j.snippet || '').slice(0, 300); } catch { snippet = String(c || '').slice(0, 300); } }
-        let s = title + (url ? `（${url}）` : '');
+        // 字段三种形态：分享 API 的 fr.result.*、导出 zip 的 fr.url/fr.title/fr.snippet（fragment 顶层，实测 16748 片段）、content JSON
+        let title = fr.title || '', url = fr.url || '', snippet = fr.snippet || '';
+        if (!title && !url && fr.result && typeof fr.result === 'object') { title = fr.result.title || ''; url = fr.result.url || ''; snippet = fr.result.snippet || snippet; }
+        if (!title && !url && c) { try { const j = JSON.parse(c); title = j.title || ''; url = j.url || ''; snippet = j.snippet || snippet; } catch { if (!snippet) snippet = String(c || '').slice(0, 300); } }
+        let s = (title || url) ? `${title}${url ? `（${url}）` : ''}` : String(c || '').slice(0, 200);
         if (s) blocks.push({ type: 'text', text: `〔浏览网页〕${s}` });
-        if (snippet) blocks.push({ type: 'text', text: `〔网页摘要〕${snippet}` });
+        if (snippet) blocks.push({ type: 'text', text: `〔网页摘要〕${String(snippet).slice(0, 300)}` });
         break;
       }
       case 'FILE': {
